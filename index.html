@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --paper:#F3F0E4;
@@ -381,6 +382,33 @@
     align-self:flex-start;
     padding:6px 14px;
     font-size:12px;
+  }
+
+  .ambiguous-block{
+    border:1.5px solid #C9A94A;
+    border-radius:6px;
+    padding:4px;
+    margin-top:14px;
+    background:var(--amber-soft);
+  }
+  .ambiguous-block table.data{
+    background:var(--white);
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .ambiguous-block .multi-pick-sum,
+  .ambiguous-block .ambiguous-actions{
+    padding:0 10px;
+  }
+  .ambiguous-block .multi-pick-sum{
+    padding-top:8px;
+  }
+  .ambiguous-actions{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    margin:10px 0 10px 0;
+    flex-wrap:wrap;
   }
 
   input.row-comment{
@@ -1028,11 +1056,11 @@ function matchSets(optimumRows, cegidRawLines, tolerance){
 
     if(oc.length && oo.length){
       // Reste des deux côtés dans le même cluster client : vraie ambiguïté à trancher à la main.
-      oc.forEach(c => {
-        ambiguous.push({
-          cegid: { montant:c.montant, date:c.date, libelle:c.libelle },
-          candidates: oo.map(o => ({ nom:o.nom, montant:o.montant, date:o.date }))
-        });
+      // Un seul bloc pour tout le cluster (pas une ligne par item Cegid) pour éviter de proposer
+      // plusieurs fois la même correspondance sur des lignes différentes.
+      ambiguous.push({
+        cegidItems: oc.map(c => ({ montant:c.montant, date:c.date, libelle:c.libelle })),
+        optimumItems: oo.map(o => ({ nom:o.nom, montant:o.montant, date:o.date }))
       });
     } else {
       oc.forEach(c => onlyCegid.push({ surname:c.surname, firstFrag:c.firstFrag, montant:c.montant, date:c.date, libelle:c.libelle }));
@@ -1048,6 +1076,7 @@ let recapRows = [];        // lignes finales du tableau de synthèse (export)
 let ambiguousResolved = []; // lignes validées manuellement (correspondances ambiguës)
 let justifOptimumRows = []; // toutes les lignes Optimum importées (pour l'export de justification)
 let justifCegidRows = [];   // toutes les lignes Cegid importées (pour l'export de justification)
+let unresolvedAmbiguousClusters = []; // cas ambigus jamais validés — filet de sécurité pour l'export
 let recapIdSeq = 0;
 
 function removeRecapRow(id, trEl){
@@ -1074,6 +1103,7 @@ function runReconciliation(){
     ambiguousResolved = [];
     justifOptimumRows = [];
     justifCegidRows = [];
+    unresolvedAmbiguousClusters = [];
     const resultsEl = document.getElementById('results');
     resultsEl.innerHTML = '';
     resultsEl.style.display = 'block';
@@ -1217,7 +1247,7 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
     <button type="button" class="pill clay filter-pill" data-type="absent-cegid">${absentCegidCount} absent côté Cegid</button>
     <button type="button" class="pill plum filter-pill" data-type="absent-optimum">${absentOptimumCount} absent côté Optimum</button>
     <button type="button" class="pill amber filter-pill" data-type="anteriorite">${anterioriteCount} antériorité (dossier identique) &gt; ${seuil} j</button>
-    ${ambiguous.length ? `<span class="pill amber">${ambiguous.length} à rapprocher manuellement</span>` : ''}
+    ${ambiguous.length ? `<span class="pill amber" id="ambiguousCountPill">${ambiguous.length} à rapprocher manuellement</span>` : ''}
   `;
   container.appendChild(tally);
 
@@ -1227,169 +1257,224 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
   filterHint.textContent = 'Cliquez sur une catégorie pour n\'afficher qu\'elle ; recliquez pour tout réafficher.';
   container.appendChild(filterHint);
 
+  // --- Tableau principal : construit avant la section ambiguë pour que les lignes validées
+  // puissent y être ajoutées directement, mais affiché après elle dans la page. ---
+  const table = document.createElement('table');
+  table.className = 'data';
+  table.innerHTML = `<thead><tr>
+    <th data-sort="client">Client</th><th class="num" data-sort="montantOptimum">Montant Optimum</th><th class="num" data-sort="montantCegid">Montant Cegid</th>
+    <th class="num" data-sort="ecart">Écart</th><th data-sort="date">Date</th><th class="num" data-sort="age">Antériorité</th><th>Motif</th><th>Commentaire</th><th></th>
+  </tr></thead>`;
+  const tbody = document.createElement('tbody');
+  const rowRefs = [];
+  let pendingEmptyNote = null;
+
+  function addProblemRow(r){
+    const id = ++recapIdSeq;
+    const entry = {
+      _id:id,
+      categorie:title, client:r.client, montantOptimum:r.montantOptimum, montantCegid:r.montantCegid,
+      ecart:r.ecart, date:r.date?fmtDate(r.date):'', anteriorite:r.age, motif:r.statut,
+      statutMagasin:'', commentaireMagasin:''
+    };
+    recapRows.push(entry);
+
+    const tr = document.createElement('tr');
+    tr.className = 'row-' + r.type;
+    tr.innerHTML = `
+      <td class="wrap">${r.client}</td>
+      <td class="num">${fmtMoney(r.montantOptimum)}</td>
+      <td class="num">${fmtMoney(r.montantCegid)}</td>
+      <td class="num">${r.ecart ? fmtMoney(r.ecart) : '—'}</td>
+      <td>${fmtDate(r.date)}</td>
+      <td class="num">${r.age!==null ? r.age+' j' : '—'}</td>
+      <td class="small">${r.statut}</td>
+      <td><input type="text" class="row-comment" placeholder="Remarque pour le magasin"></td>
+      <td><button class="row-delete" title="Retirer cette ligne" onclick="removeRecapRow(${id}, this.closest('tr'))">✕</button></td>`;
+    tr.querySelector('.row-comment').addEventListener('input', (e) => { entry.commentaireMagasin = e.target.value; });
+    if(r.commentaireInitial) tr.querySelector('.row-comment').value = r.commentaireInitial;
+    tbody.appendChild(tr);
+    rowRefs.push({ r, tr });
+    if(pendingEmptyNote){
+      table.closest('.table-scroll').style.display = '';
+      pendingEmptyNote.remove();
+      pendingEmptyNote = null;
+    }
+    return tr;
+  }
+
+  problemRows.forEach(r => addProblemRow(r));
+
+  // --- Section ambiguë : même style de tableau que ci-dessous, avec une colonne à cocher. ---
   if(ambiguous.length){
     const note = document.createElement('p');
     note.className = 'hint sans';
-    note.textContent = 'Correspondances ambiguës — cochez un ou plusieurs clients Optimum pour chaque ligne Cegid (utile quand un dossier Cegid regroupe plusieurs dossiers Optimum). La ligne rejoint automatiquement le tableau de synthèse une fois validée.';
+    note.innerHTML = '<strong>Ce que c\'est :</strong> pour ce ou ces clients, aucune combinaison automatique de lignes Cegid et de dossiers Optimum ne tombe exactement juste. '
+      + '<strong>Ce qu\'il faut faire :</strong> cochez les lignes qui correspondent au même événement réel (Cegid et/ou Optimum), vérifiez le total, ajoutez un commentaire si besoin, puis cliquez sur « Valider ». '
+      + 'Une fois validée, la ligne quitte cet encadré et rejoint le tableau ci-dessous si un écart persiste. Ce que vous laissez décoché repart comme une ligne à part. Si vous ne validez rien du tout, le cas reste visible tel quel dans l\'export final, marqué « à vérifier ».';
     container.appendChild(note);
 
-    const table = document.createElement('table');
-    table.className = 'data';
-    table.innerHTML = `<thead><tr><th>Libellé Cegid</th><th class="num">Montant</th><th>Correspondance(s) Optimum</th><th>Résultat</th></tr></thead>`;
-    const tbody = document.createElement('tbody');
     ambiguous.forEach((a) => {
-      const tr = document.createElement('tr');
-      tr.className = 'row-anteriorite';
+      const clusterRef = { categorie: title, cegidItems: a.cegidItems, optimumItems: a.optimumItems, resolved: false };
+      unresolvedAmbiguousClusters.push(clusterRef);
 
-      const tdLib = document.createElement('td');
-      tdLib.className = 'small';
-      tdLib.textContent = a.cegid.libelle;
+      const block = document.createElement('div');
+      block.className = 'ambiguous-block';
 
-      const tdMontant = document.createElement('td');
-      tdMontant.className = 'num';
-      tdMontant.textContent = fmtMoney(a.cegid.montant);
+      const atable = document.createElement('table');
+      atable.className = 'data';
+      atable.innerHTML = `<thead><tr><th></th><th>Origine</th><th class="wrap">Client / Libellé</th><th class="num">Montant</th><th>Date</th></tr></thead>`;
+      const atbody = document.createElement('tbody');
 
-      const tdPick = document.createElement('td');
-      const pickList = document.createElement('div');
-      pickList.className = 'multi-pick';
-      const checkboxes = a.candidates.map((c, i) => {
-        const label = document.createElement('label');
-        label.className = 'multi-pick-item';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox'; cb.value = i;
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(' ' + c.nom + ' — ' + fmtMoney(c.montant)));
-        pickList.appendChild(label);
+      const cegidBoxes = a.cegidItems.map((c,i) => {
+        const tr = document.createElement('tr');
+        tr.className = 'row-anteriorite';
+        const cb = document.createElement('input'); cb.type = 'checkbox';
+        const tdCb = document.createElement('td'); tdCb.appendChild(cb);
+        tr.appendChild(tdCb);
+        tr.insertAdjacentHTML('beforeend', `<td class="small">Cegid</td><td class="wrap">${c.libelle}</td><td class="num">${fmtMoney(c.montant)}</td><td>${fmtDate(c.date)}</td>`);
+        atbody.appendChild(tr);
         return cb;
       });
+      const optimumBoxes = a.optimumItems.map((o,i) => {
+        const tr = document.createElement('tr');
+        tr.className = 'row-anteriorite';
+        const cb = document.createElement('input'); cb.type = 'checkbox';
+        const tdCb = document.createElement('td'); tdCb.appendChild(cb);
+        tr.appendChild(tdCb);
+        tr.insertAdjacentHTML('beforeend', `<td class="small">Optimum</td><td class="wrap">${o.nom}</td><td class="num">${fmtMoney(o.montant)}</td><td>${fmtDate(o.date)}</td>`);
+        atbody.appendChild(tr);
+        return cb;
+      });
+      atable.appendChild(atbody);
+      block.appendChild(atable);
+
       const sumLine = document.createElement('div');
       sumLine.className = 'multi-pick-sum small';
+      block.appendChild(sumLine);
+
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'ambiguous-actions';
+      const commentInput = document.createElement('input');
+      commentInput.type = 'text'; commentInput.className = 'row-comment'; commentInput.placeholder = 'Commentaire pour le magasin';
       const validateBtn = document.createElement('button');
-      validateBtn.type = 'button';
-      validateBtn.className = 'secondary multi-pick-validate';
-      validateBtn.textContent = 'Valider';
-      pickList.appendChild(sumLine);
-      pickList.appendChild(validateBtn);
-      tdPick.appendChild(pickList);
+      validateBtn.type = 'button'; validateBtn.className = 'secondary multi-pick-validate'; validateBtn.textContent = 'Valider';
+      actionsRow.appendChild(commentInput);
+      actionsRow.appendChild(validateBtn);
+      block.appendChild(actionsRow);
 
-      const tdResult = document.createElement('td');
-      tdResult.className = 'small';
+      const errorLine = document.createElement('div');
+      errorLine.className = 'small';
+      block.appendChild(errorLine);
 
-      function updateSumLine(){
-        const chosen = checkboxes.filter(cb => cb.checked).map(cb => a.candidates[parseInt(cb.value)]);
-        if(chosen.length === 0){ sumLine.textContent = ''; return; }
-        const sum = chosen.reduce((s,c) => s + c.montant, 0);
-        sumLine.textContent = `Somme sélectionnée : ${fmtMoney(sum)} (dossier Cegid : ${fmtMoney(a.cegid.montant)})`;
+      function updateSum(){
+        const cSel = cegidBoxes.filter(cb => cb.checked).map((cb,idx) => a.cegidItems[cegidBoxes.indexOf(cb)]);
+        const oSel = optimumBoxes.filter(cb => cb.checked).map((cb,idx) => a.optimumItems[optimumBoxes.indexOf(cb)]);
+        if(cSel.length === 0 && oSel.length === 0){ sumLine.textContent = ''; return; }
+        const cSum = cSel.reduce((s,x) => s + x.montant, 0);
+        const oSum = oSel.reduce((s,x) => s + x.montant, 0);
+        sumLine.textContent = `Cegid sélectionné : ${fmtMoney(cSum)} · Optimum sélectionné : ${fmtMoney(oSum)} · Écart : ${fmtMoney(oSum-cSum)}`;
       }
-      checkboxes.forEach(cb => cb.addEventListener('change', updateSumLine));
+      cegidBoxes.concat(optimumBoxes).forEach(cb => cb.addEventListener('change', updateSum));
+
+      function bumpTally(type, delta){
+        const pill = tally.querySelector(`[data-type="${type}"]`);
+        if(!pill) return;
+        const n = parseInt(pill.textContent) + delta;
+        pill.textContent = pill.textContent.replace(/^\d+/, n);
+      }
 
       validateBtn.addEventListener('click', () => {
-        ambiguousResolved = ambiguousResolved.filter(r => r._key !== tr);
-        tdResult.innerHTML = '';
-        const chosen = checkboxes.filter(cb => cb.checked).map(cb => a.candidates[parseInt(cb.value)]);
-        if(chosen.length === 0){ updateRecapCount(); return; }
-
-        const montantOptimum = chosen.reduce((s,c) => s + c.montant, 0);
-        const nomAffiche = chosen.length > 1 ? chosen[0].nom + ' (' + chosen.length + ' dossiers)' : chosen[0].nom;
-        const dates = chosen.map(c => c.date).filter(Boolean);
-        const date = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : a.cegid.date;
-        const ecart = montantOptimum - a.cegid.montant;
-        const age = daysSince(date);
-        const isAnomaly = Math.abs(ecart) > tolerance;
-        const isAging = !isAnomaly && age!==null && age > seuil;
-
-        if(!isAnomaly && !isAging){
-          tdResult.textContent = 'sans anomalie — non ajouté à la synthèse';
-          updateRecapCount();
+        const cSel = cegidBoxes.map((cb,i) => ({cb, item:a.cegidItems[i]})).filter(x => x.cb.checked);
+        const oSel = optimumBoxes.map((cb,i) => ({cb, item:a.optimumItems[i]})).filter(x => x.cb.checked);
+        if(cSel.length === 0 && oSel.length === 0){
+          errorLine.textContent = 'Cochez au moins une ligne avant de valider.';
+          errorLine.style.color = 'var(--rust)';
           return;
         }
 
-        const entry = {
-          _key: tr,
-          categorie:title, client:nomAffiche, montantOptimum, montantCegid:a.cegid.montant,
-          ecart:isAnomaly?ecart:0, date:date?fmtDate(date):'', anteriorite:age,
-          motif:isAnomaly ? 'écart de montant (validé manuellement)' : 'antériorité (dossier identique, validé manuellement)',
-          statutMagasin:'', commentaireMagasin:''
-        };
-        ambiguousResolved.push(entry);
+        let added = 0;
+        if(cSel.length && oSel.length){
+          const cSum = cSel.reduce((s,x) => s + x.item.montant, 0);
+          const oSum = oSel.reduce((s,x) => s + x.item.montant, 0);
+          const nomAffiche = oSel.length > 1 ? oSel[0].item.nom + ' (' + oSel.length + ' dossiers)' : oSel[0].item.nom;
+          const dates = oSel.map(x => x.item.date).concat(cSel.map(x => x.item.date)).filter(Boolean);
+          const date = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+          const ecart = oSum - cSum;
+          const age = daysSince(date);
+          const isAnomaly = Math.abs(ecart) > tolerance;
+          const isAging = !isAnomaly && age!==null && age > seuil;
+          if(isAnomaly || isAging){
+            addProblemRow({
+              type: isAnomaly ? 'ecart-montant' : 'anteriorite',
+              client: nomAffiche, montantOptimum:oSum, montantCegid:cSum,
+              ecart: isAnomaly?ecart:0, date, age,
+              statut: (isAnomaly ? 'écart de montant' : 'antériorité (dossier identique)') + ' (validé manuellement)',
+              commentaireInitial: commentInput.value
+            });
+            added++;
+            bumpTally(isAnomaly ? 'ecart-montant' : 'anteriorite', 1);
+          }
+        }
+        cegidBoxes.forEach((cb,i) => {
+          if(cb.checked) return;
+          const item = a.cegidItems[i];
+          if(Math.abs(item.montant) <= tolerance) return;
+          addProblemRow({ type:'absent-optimum', client:item.libelle, montantOptimum:null, montantCegid:item.montant, ecart:null, date:item.date, age:daysSince(item.date), statut:'absent côté Optimum (validé manuellement)', commentaireInitial: commentInput.value });
+          added++; bumpTally('absent-optimum', 1);
+        });
+        optimumBoxes.forEach((cb,i) => {
+          if(cb.checked) return;
+          const item = a.optimumItems[i];
+          if(Math.abs(item.montant) <= tolerance) return;
+          addProblemRow({ type:'absent-cegid', client:item.nom, montantOptimum:item.montant, montantCegid:null, ecart:null, date:item.date, age:daysSince(item.date), statut:'absent côté Cegid (validé manuellement)', commentaireInitial: commentInput.value });
+          added++; bumpTally('absent-cegid', 1);
+        });
 
-        const summary = document.createElement('span');
-        summary.textContent = isAnomaly
-          ? `écart ${fmtMoney(ecart)}`
-          : `identique · ${age!==null ? age+' j' : '—'}`;
-        const commentInput = document.createElement('input');
-        commentInput.type = 'text';
-        commentInput.className = 'row-comment';
-        commentInput.placeholder = 'Commentaire pour le magasin';
-        commentInput.addEventListener('input', () => { entry.commentaireMagasin = commentInput.value; });
-        tdResult.appendChild(summary);
-        tdResult.appendChild(commentInput);
+        clusterRef.resolved = true;
+        const countPill = document.getElementById('ambiguousCountPill');
+        if(countPill){
+          const remaining = unresolvedAmbiguousClusters.filter(c => c.categorie===title && !c.resolved).length;
+          if(remaining === 0) countPill.remove(); else countPill.textContent = remaining + ' à rapprocher manuellement';
+        }
+        block.remove();
         updateRecapCount();
       });
 
-      tr.appendChild(tdLib); tr.appendChild(tdMontant); tr.appendChild(tdPick); tr.appendChild(tdResult);
-      tbody.appendChild(tr);
+      container.appendChild(block);
     });
-    table.appendChild(tbody);
-    appendTable(container, table);
   }
 
-  if(problemRows.length === 0){
+  table.appendChild(tbody);
+  appendTable(container, table);
+  makeSortable(table, rowRefs);
+
+  const filterPills = Array.from(tally.querySelectorAll('.filter-pill'));
+  let activeType = null;
+  filterPills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      activeType = (activeType === pill.dataset.type) ? null : pill.dataset.type;
+      filterPills.forEach(p => p.classList.toggle('off', activeType!==null && p.dataset.type!==activeType));
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        const show = activeType===null || tr.classList.contains('row-'+activeType);
+        tr.style.display = show ? '' : 'none';
+      });
+    });
+  });
+
+  if(problemRows.length === 0 && ambiguous.length === 0){
     const p = document.createElement('div');
     p.className = 'empty-note';
     p.textContent = 'Aucun écart ni antériorité au-delà du seuil sur cette catégorie.';
     container.appendChild(p);
-  } else {
-    const table = document.createElement('table');
-    table.className = 'data';
-    table.innerHTML = `<thead><tr>
-      <th data-sort="client">Client</th><th class="num" data-sort="montantOptimum">Montant Optimum</th><th class="num" data-sort="montantCegid">Montant Cegid</th>
-      <th class="num" data-sort="ecart">Écart</th><th data-sort="date">Date</th><th class="num" data-sort="age">Antériorité</th><th>Motif</th><th>Commentaire</th><th></th>
-    </tr></thead>`;
-    const tbody = document.createElement('tbody');
-    const rowRefs = [];
-    problemRows.forEach(r => {
-      const id = ++recapIdSeq;
-      const entry = {
-        _id:id,
-        categorie:title, client:r.client, montantOptimum:r.montantOptimum, montantCegid:r.montantCegid,
-        ecart:r.ecart, date:r.date?fmtDate(r.date):'', anteriorite:r.age, motif:r.statut,
-        statutMagasin:'', commentaireMagasin:''
-      };
-      recapRows.push(entry);
-
-      const tr = document.createElement('tr');
-      tr.className = 'row-' + r.type;
-      tr.innerHTML = `
-        <td class="wrap">${r.client}</td>
-        <td class="num">${fmtMoney(r.montantOptimum)}</td>
-        <td class="num">${fmtMoney(r.montantCegid)}</td>
-        <td class="num">${r.ecart ? fmtMoney(r.ecart) : '—'}</td>
-        <td>${fmtDate(r.date)}</td>
-        <td class="num">${r.age!==null ? r.age+' j' : '—'}</td>
-        <td class="small">${r.statut}</td>
-        <td><input type="text" class="row-comment" placeholder="Remarque pour le magasin"></td>
-        <td><button class="row-delete" title="Retirer cette ligne" onclick="removeRecapRow(${id}, this.closest('tr'))">✕</button></td>`;
-      tr.querySelector('.row-comment').addEventListener('input', (e) => { entry.commentaireMagasin = e.target.value; });
-      tbody.appendChild(tr);
-      rowRefs.push({ r, tr });
-    });
-    table.appendChild(tbody);
-    appendTable(container, table);
-    makeSortable(table, rowRefs);
-
-    const filterPills = Array.from(tally.querySelectorAll('.filter-pill'));
-    let activeType = null;
-    filterPills.forEach(pill => {
-      pill.addEventListener('click', () => {
-        activeType = (activeType === pill.dataset.type) ? null : pill.dataset.type;
-        filterPills.forEach(p => p.classList.toggle('off', activeType!==null && p.dataset.type!==activeType));
-        table.querySelectorAll('tbody tr').forEach(tr => {
-          const show = activeType===null || tr.classList.contains('row-'+activeType);
-          tr.style.display = show ? '' : 'none';
-        });
-      });
-    });
+  } else if(problemRows.length === 0){
+    // Rien à afficher pour l'instant, mais le tableau doit rester en mémoire : les cas
+    // ambigus résolus ci-dessus y ajouteront des lignes dynamiquement.
+    table.closest('.table-scroll').style.display = 'none';
+    pendingEmptyNote = document.createElement('div');
+    pendingEmptyNote.className = 'empty-note';
+    pendingEmptyNote.textContent = 'Aucune autre ligne pour l\'instant — résolvez le(s) cas ci-dessus, il(s) apparaîtra/apparaîtront ici.';
+    container.appendChild(pendingEmptyNote);
   }
 }
 
@@ -1491,82 +1576,124 @@ function envoyerAuSuivi(){
   });
 }
 
-/* ============================= EXPORT ============================= */
-function exportRecap(storeName){
-  const all = recapRows.concat(ambiguousResolved);
+/* ============================= EXPORT (ExcelJS) ============================= */
+// Palette extraite des pages de procédures Edgard (comptabilite-edgard.github.io) :
+// or de marque, fond crème, et les trois couleurs de pastille (or/vert/bleu).
+const XL_COLORS = {
+  navy:'FF1A1A18', white:'FFFFFFFF',              // texte foncé "OPTICIENS", cartes blanches
+  paperTint:'FFF5F4EF', paperLine:'FFE4E0D4',     // fond crème de page Edgard
+  gold:'FFB8982A', goldSoft:'FFFAEEDA', goldText:'FF6B3E0A', // or de marque + pastille "manuel"
+  green:'FF3B6D11', greenSoft:'FFEAF3DE',         // pastille "automatique"
+  blue:'FF2C57B0', blueSoft:'FFE8EEFB',           // pastille "déclenché par toi"
+  rust:'FFA8412C', rustSoft:'FFF3DCD5'            // écarts réels / provisions (pas d'équivalent Edgard, garde le rouge usuel)
+};
+const EURO_FMT = '#,##0.00" €"';
 
-  const data = all.map(r => ({
-    'Catégorie': r.categorie,
-    'Client': r.client,
-    'Montant Optimum': r.montantOptimum,
-    'Montant Cegid': r.montantCegid,
-    'Écart': r.ecart,
-    'Date': r.date,
-    'Antériorité (jours)': r.anteriorite,
-    'Motif': r.motif,
-    'Statut magasin': r.statutMagasin,
-    'Commentaire magasin': r.commentaireMagasin
-  }));
-  const ws = XLSX.utils.json_to_sheet(data);
-  ws['!cols'] = [
-    {wch:20},{wch:24},{wch:16},{wch:16},{wch:12},{wch:12},{wch:16},{wch:24},{wch:16},{wch:30}
+function styleHeaderRow(row, fillArgb, fontArgb){
+  row.eachCell(cell => {
+    cell.font = { bold:true, color:{argb:fontArgb||XL_COLORS.navy} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:fillArgb} };
+    cell.border = { bottom:{style:'medium', color:{argb:XL_COLORS.navy}} };
+  });
+}
+function styleTotalRow(row){
+  row.eachCell(cell => {
+    cell.font = { bold:true };
+    cell.border = { top:{style:'double', color:{argb:XL_COLORS.navy}} };
+  });
+}
+function addTitleRow(ws, text, lastCol, height){
+  ws.mergeCells(1,1,1,lastCol);
+  const cell = ws.getCell(1,1);
+  cell.value = text;
+  cell.font = { bold:true, color:{argb:XL_COLORS.white}, size:12 };
+  cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.gold} };
+  cell.alignment = { vertical:'middle' };
+  ws.getRow(1).height = height || 22;
+}
+async function downloadWorkbook(wb, filename){
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportRecap(storeName){
+  const all = recapRows.concat(ambiguousResolved);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Synthèse');
+  ws.columns = [
+    {header:'Catégorie', key:'categorie', width:20},
+    {header:'Client', key:'client', width:26},
+    {header:'Montant Optimum', key:'montantOptimum', width:16},
+    {header:'Montant Cegid', key:'montantCegid', width:16},
+    {header:'Écart', key:'ecart', width:12},
+    {header:'Date', key:'date', width:12},
+    {header:'Antériorité (jours)', key:'anteriorite', width:16},
+    {header:'Motif', key:'motif', width:26},
+    {header:'Statut magasin', key:'statutMagasin', width:16},
+    {header:'Commentaire magasin', key:'commentaireMagasin', width:32}
   ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Synthèse');
+  styleHeaderRow(ws.getRow(1), XL_COLORS.paperTint, XL_COLORS.navy);
+  all.forEach(r => ws.addRow(r));
+  ['montantOptimum','montantCegid','ecart'].forEach(key => {
+    ws.getColumn(key).numFmt = EURO_FMT;
+  });
+  ws.views = [{ state:'frozen', ySplit:1 }];
   const today = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `Synthese_${storeName.replace(/[^a-zA-Z0-9]+/g,'_')}_${today}.xlsx`);
+  await downloadWorkbook(wb, `Synthese_${storeName.replace(/[^a-zA-Z0-9]+/g,'_')}_${today}.xlsx`);
 }
 
 // Construit un onglet "liste + total" (un onglet par export importé : TP Optimum, TP Cegid,
 // Chèques Optimum, Chèques Cegid, CB, Virements). Renvoie les coordonnées du total pour que
 // les onglets d'écarts puissent y faire référence par formule.
-const EURO_FMT = '#,##0.00" €"';
-function applyEuroCol(ws, colLetter, fromRow, toRow){
-  for(let r = fromRow; r <= toRow; r++){
-    const ref = colLetter + r;
-    if(ws[ref]) ws[ref].z = EURO_FMT;
-  }
-}
 function addListSheet(wb, sheetName, titleText, rows, columns, montantKey){
-  const TITLE_BLOCK = 2;
-  const headerRow = TITLE_BLOCK + 1;
-  const n = rows.length;
-  const data = rows.map(r => {
-    const obj = {};
-    columns.forEach(c => { obj[c.header] = r[c.key]; });
-    return obj;
-  });
-  const totalObj = {};
-  columns.forEach((c,i) => { totalObj[c.header] = (i===0) ? 'TOTAL' : null; });
-  data.push(totalObj);
+  const ws = wb.addWorksheet(sheetName);
+  const lastCol = columns.length;
+  ws.columns = columns.map(c => ({ width: c.wch || 16 }));
+  addTitleRow(ws, titleText, lastCol);
 
-  const ws = XLSX.utils.aoa_to_sheet([[titleText]]);
-  XLSX.utils.sheet_add_json(ws, data, { origin: 'A' + headerRow, skipHeader: false });
-  const totalRow = headerRow + n + 1;
-  const montantColIdx = columns.findIndex(c => c.key === montantKey);
-  const montantColLetter = XLSX.utils.encode_col(montantColIdx);
+  const headerRowNum = 3;
+  const headerRow = ws.getRow(headerRowNum);
+  columns.forEach((c,i) => { headerRow.getCell(i+1).value = c.header; });
+  styleHeaderRow(headerRow, XL_COLORS.paperTint, XL_COLORS.navy);
+
+  const n = rows.length;
+  rows.forEach((r,i) => {
+    const row = ws.getRow(headerRowNum+1+i);
+    columns.forEach((c,ci) => { row.getCell(ci+1).value = r[c.key]; });
+  });
+
+  const totalRowNum = headerRowNum + n + 1;
+  const totalRow = ws.getRow(totalRowNum);
+  totalRow.getCell(1).value = 'TOTAL';
+  const montantColIdx = columns.findIndex(c => c.key === montantKey) + 1;
+  const montantColLetter = ws.getColumn(montantColIdx).letter;
   const sum = round2(rows.reduce((s,r) => s + (r[montantKey]||0), 0));
-  ws[montantColLetter + totalRow] = n > 0
-    ? { t:'n', f: 'SUM(' + montantColLetter + (headerRow+1) + ':' + montantColLetter + (headerRow+n) + ')', v: sum }
-    : { t:'n', v: 0 };
-  applyEuroCol(ws, montantColLetter, headerRow+1, totalRow);
-  ws['!cols'] = columns.map(c => ({ wch: c.wch || 16 }));
-  ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:columns.length-1} }];
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  return { sheetName, totalRow, montantColLetter, sum, n };
+  totalRow.getCell(montantColIdx).value = n > 0
+    ? { formula: `SUM(${montantColLetter}${headerRowNum+1}:${montantColLetter}${headerRowNum+n})`, result: sum }
+    : 0;
+  styleTotalRow(totalRow);
+  for(let r = headerRowNum+1; r <= totalRowNum; r++) ws.getCell(montantColLetter+r).numFmt = EURO_FMT;
+  return { sheetName, totalRow: totalRowNum, montantColLetter, sum, n };
 }
 
 // Export de clôture : un onglet par fichier importé (TP Optimum/Cegid, Chèques Optimum/Cegid,
-// CB, Virements), chacun avec son titre et son total en formule, puis un onglet d'écarts
-// séparé par type d'encaissement (Tiers-payants, Chèques, CB, Virements), avec rappel des
-// totaux, écart, et le détail justifié (commentaires inclus).
-function exportJustification(){
+// CB, Virements), chacun avec son titre et son total en formule, un onglet d'écarts séparé
+// par type d'encaissement, un onglet Synthèse (couleurs + mise en forme conditionnelle), et
+// un onglet Provisions pour les dossiers antérieurs à provisionner.
+async function exportJustification(){
   const magasin = document.getElementById('magasinSync').value;
   const closingDate = document.getElementById('closingDate').value.trim();
   if(!magasin){ alert('Choisissez un magasin avant d\'exporter la justification de clôture.'); return; }
   if(!closingDate){ alert('Indiquez la date de clôture (JJ.MM.AAAA) avant d\'exporter.'); return; }
+  const seuilAnteriorite = parseInt(document.getElementById('paramSeuil').value) || 60;
 
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
+  const wsSynth = wb.addWorksheet('Synthèse'); // créé en premier pour rester le premier onglet, rempli plus loin
 
   const optCols = [{key:'client', header:'Client', wch:28}, {key:'montant', header:'Montant', wch:14}, {key:'date', header:'Date', wch:14}];
   const cegCols = [{key:'libelle', header:'Libellé', wch:40}, {key:'montant', header:'Montant', wch:14}, {key:'date', header:'Date', wch:14}];
@@ -1591,96 +1718,323 @@ function exportJustification(){
 
   // --- Onglets d'écarts, un par type d'encaissement ---
   function ecartLines(categorie){
-    return recapRows.filter(r => r.categorie === categorie).concat(ambiguousResolved.filter(r => r.categorie === categorie));
+    const resolved = recapRows.filter(r => r.categorie === categorie).concat(ambiguousResolved.filter(r => r.categorie === categorie));
+    // Filet de sécurité : les cas ambigus jamais validés par l'utilisateur restent visibles dans
+    // l'export, clairement marqués, plutôt que de disparaître silencieusement.
+    const unresolved = [];
+    unresolvedAmbiguousClusters.filter(c => c.categorie === categorie && !c.resolved).forEach(c => {
+      const candidatsTxt = c.optimumItems.map(o => o.nom + ' ' + fmtMoney(o.montant)).join(', ');
+      c.cegidItems.forEach(item => {
+        unresolved.push({
+          client: item.libelle, montantOptimum: null, montantCegid: item.montant, ecart: null,
+          date: item.date ? fmtDate(item.date) : '', anteriorite: daysSince(item.date),
+          motif: 'NON RÉSOLU — à vérifier manuellement (candidats Optimum possibles : ' + candidatsTxt + ')',
+          commentaireMagasin: ''
+        });
+      });
+    });
+    return resolved.concat(unresolved);
   }
 
   // Un onglet d'écarts à deux côtés (TP, Chèques) : rappel Optimum/Cegid/écart en formules,
-  // puis le détail avec écart calculé ligne à ligne, sans colonne antériorité.
+  // puis deux tableaux colorés — écarts de montant (rouge) et dossiers antérieurs (doré),
+  // avec surlignage des dossiers qui dépassent le seuil de provisionnement.
   function writeTwoSidedSheet(sheetName, title, categorie, optInfo, cegInfo){
     if(!optInfo && !cegInfo) return;
-    const lines = ecartLines(categorie);
-    const ws = XLSX.utils.aoa_to_sheet([[`${magasin} - Écarts ${title} ${closingDate}`]]);
+    const allLines = ecartLines(categorie);
+    const ecartsOnly = allLines.filter(r => !(r.motif||'').includes('antériorité'));
+    const anteriorityOnly = allLines.filter(r => (r.motif||'').includes('antériorité'));
+    const seuilProvision = categorie === 'Tiers-payants' ? 730 : 365;
+
+    const ws = wb.addWorksheet(sheetName);
+    const lastCol = 7;
+    ws.columns = [{width:26},{width:16},{width:16},{width:12},{width:12},{width:26},{width:34}];
+    addTitleRow(ws, `${magasin} - Écarts ${title} ${closingDate}`, lastCol);
+
     const recapStart = 3;
-    XLSX.utils.sheet_add_aoa(ws, [
-      [`Total ${title} Optimum`, null],
-      [`Total ${title} Cegid`, null],
-      [`Écart ${title}`, null],
-      ['Somme des écarts détaillés', null],
-      ['Écart résiduel sous tolérance', null]
-    ], { origin: 'A' + recapStart });
+    const labels = [
+      `Total ${title} Optimum`, `Total ${title} Cegid`, `Écart ${title}`,
+      'Somme des écarts de montant détaillés ci-dessous', 'Écart résiduel (dossiers antérieurs identiques + sous tolérance)'
+    ];
+    labels.forEach((lab,i) => { ws.getCell(recapStart+i,1).value = lab; ws.getCell(recapStart+i,1).font = {bold:true}; });
 
     const optSum = optInfo ? optInfo.sum : 0;
     const cegSum = cegInfo ? cegInfo.sum : 0;
-    ws['B' + recapStart] = optInfo
-      ? { t:'n', f: `'${optInfo.sheetName}'!${optInfo.montantColLetter}${optInfo.totalRow}`, v: optSum }
-      : { t:'n', v: 0 };
-    ws['B' + (recapStart+1)] = cegInfo
-      ? { t:'n', f: `'${cegInfo.sheetName}'!${cegInfo.montantColLetter}${cegInfo.totalRow}`, v: cegSum }
-      : { t:'n', v: 0 };
-    ws['B' + (recapStart+2)] = { t:'n', f: `B${recapStart}-B${recapStart+1}`, v: round2(optSum-cegSum) };
+    ws.getCell(recapStart,2).value = optInfo
+      ? { formula:`'${optInfo.sheetName}'!${optInfo.montantColLetter}${optInfo.totalRow}`, result:optSum }
+      : 0;
+    ws.getCell(recapStart+1,2).value = cegInfo
+      ? { formula:`'${cegInfo.sheetName}'!${cegInfo.montantColLetter}${cegInfo.totalRow}`, result:cegSum }
+      : 0;
+    ws.getCell(recapStart+2,2).value = { formula:`B${recapStart}-B${recapStart+1}`, result: round2(optSum-cegSum) };
 
-    const tableHeaderRow = recapStart + 6; // 5 lignes de rappel + 1 ligne blanche
-    const firstDataRow = tableHeaderRow + 1;
-    const lastDataRow = tableHeaderRow + lines.length;
-    const tableData = lines.map(r => ({
-      'Client': r.client, 'Montant Optimum': r.montantOptimum, 'Montant Cegid': r.montantCegid,
-      'Écart': null, 'Date': r.date, 'Motif': r.motif, 'Commentaire': r.commentaireMagasin
-    }));
-    XLSX.utils.sheet_add_json(ws, tableData, { origin: 'A' + tableHeaderRow, skipHeader: false });
+    const ecartsTitleRow = recapStart + 6; // 5 lignes de rappel + 1 ligne blanche
+    ws.mergeCells(ecartsTitleRow,1,ecartsTitleRow,lastCol);
+    const ecartsTitleCell = ws.getCell(ecartsTitleRow,1);
+    ecartsTitleCell.value = 'Justification des écarts';
+    ecartsTitleCell.font = {bold:true, color:{argb:XL_COLORS.white}};
+    ecartsTitleCell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:XL_COLORS.rust}};
+
+    const tableHeaderRow = ecartsTitleRow+1;
+    ['Client','Montant Optimum','Montant Cegid','Écart','Date','Motif','Commentaire'].forEach((h,i) => ws.getCell(tableHeaderRow,i+1).value = h);
+    styleHeaderRow(ws.getRow(tableHeaderRow), XL_COLORS.rustSoft, XL_COLORS.navy);
+
+    const firstDataRow = tableHeaderRow+1;
+    const lastDataRow = tableHeaderRow + ecartsOnly.length;
+    ecartsOnly.forEach((r,i) => {
+      const rn = firstDataRow+i;
+      ws.getCell(rn,1).value = r.client;
+      ws.getCell(rn,2).value = r.montantOptimum;
+      ws.getCell(rn,3).value = r.montantCegid;
+      ws.getCell(rn,5).value = r.date;
+      ws.getCell(rn,6).value = r.motif;
+      ws.getCell(rn,7).value = r.commentaireMagasin;
+    });
 
     let sommeDetaillee = 0;
-    if(lines.length > 0){
-      sommeDetaillee = round2(lines.reduce((s,r)=>s+((r.montantOptimum||0)-(r.montantCegid||0)),0));
-      ws['B' + (recapStart+3)] = { t:'n', f: `SUM(D${firstDataRow}:D${lastDataRow})`, v: sommeDetaillee };
-      for(let i=0;i<lines.length;i++){
-        const row = firstDataRow + i;
-        ws['D' + row] = { t:'n', f: `B${row}-C${row}`, v: round2((lines[i].montantOptimum||0)-(lines[i].montantCegid||0)) };
+    if(ecartsOnly.length > 0){
+      sommeDetaillee = round2(ecartsOnly.reduce((s,r)=>s+((r.montantOptimum||0)-(r.montantCegid||0)),0));
+      ws.getCell(recapStart+3,2).value = { formula:`SUM(D${firstDataRow}:D${lastDataRow})`, result: sommeDetaillee };
+      for(let i=0;i<ecartsOnly.length;i++){
+        const rn = firstDataRow+i;
+        ws.getCell(rn,4).value = { formula:`B${rn}-C${rn}`, result: round2((ecartsOnly[i].montantOptimum||0)-(ecartsOnly[i].montantCegid||0)) };
       }
-      applyEuroCol(ws, 'B', firstDataRow, lastDataRow);
-      applyEuroCol(ws, 'C', firstDataRow, lastDataRow);
+      for(let rn=firstDataRow; rn<=lastDataRow; rn++){
+        ws.getCell(rn,2).numFmt = EURO_FMT; ws.getCell(rn,3).numFmt = EURO_FMT; ws.getCell(rn,4).numFmt = EURO_FMT;
+      }
     } else {
-      ws['B' + (recapStart+3)] = { t:'n', v: 0 };
+      ws.getCell(recapStart+3,2).value = 0;
     }
-    ws['B' + (recapStart+4)] = { t:'n', f: `B${recapStart+2}-B${recapStart+3}`, v: round2(round2(optSum-cegSum) - sommeDetaillee) };
-    applyEuroCol(ws, 'B', recapStart, recapStart+4);
-    applyEuroCol(ws, 'D', firstDataRow, lastDataRow);
+    const ecartResiduel = round2(round2(optSum-cegSum) - sommeDetaillee);
+    ws.getCell(recapStart+4,2).value = { formula:`B${recapStart+2}-B${recapStart+3}`, result: ecartResiduel };
+    for(let rn=recapStart; rn<=recapStart+4; rn++) ws.getCell(rn,2).numFmt = EURO_FMT;
+    const residuCell = ws.getCell(recapStart+4,2);
+    residuCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb: Math.abs(ecartResiduel)<0.005 ? XL_COLORS.greenSoft : XL_COLORS.rustSoft } };
+    residuCell.font = { bold:true };
 
-    ws['!cols'] = [{wch:26},{wch:16},{wch:16},{wch:12},{wch:12},{wch:26},{wch:34}];
-    ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:6} }];
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    // --- Ligne Total, juste sous le tableau des écarts ---
+    const ecartsTotalRow = lastDataRow + 1;
+    ws.getCell(ecartsTotalRow,1).value = 'Total';
+    if(ecartsOnly.length > 0){
+      ws.getCell(ecartsTotalRow,4).value = { formula:`SUM(D${firstDataRow}:D${lastDataRow})`, result: sommeDetaillee };
+      ws.getCell(ecartsTotalRow,4).numFmt = EURO_FMT;
+    }
+    ws.getRow(ecartsTotalRow).eachCell({includeEmpty:true}, (c, colNum) => {
+      if(colNum > lastCol) return;
+      c.font = { bold:true };
+      c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.rustSoft} };
+    });
+
+    // --- Table 2 : dossiers antérieurs (identiques des deux côtés, mais ouverts depuis trop longtemps) ---
+    let cursor2 = ecartsTotalRow + 2;
+    ws.mergeCells(cursor2,1,cursor2,lastCol);
+    const antTitleCell = ws.getCell(cursor2,1);
+    antTitleCell.value = `Justification des dossiers antérieurs (dossiers de plus de ${seuilAnteriorite} jours)`;
+    antTitleCell.font = {bold:true, color:{argb:XL_COLORS.white}};
+    antTitleCell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:XL_COLORS.gold}};
+
+    const antTableHeaderRow = cursor2+1;
+    ['Client','Montant Optimum','Montant Cegid','Date','Antériorité (jours)','Commentaire'].forEach((h,i) => ws.getCell(antTableHeaderRow,i+1).value = h);
+    styleHeaderRow(ws.getRow(antTableHeaderRow), XL_COLORS.goldSoft, XL_COLORS.navy);
+    const antFirstDataRow = antTableHeaderRow+1;
+    anteriorityOnly.forEach((r,i) => {
+      const rn = antFirstDataRow+i;
+      ws.getCell(rn,1).value = r.client;
+      ws.getCell(rn,2).value = r.montantOptimum;
+      ws.getCell(rn,3).value = r.montantCegid;
+      ws.getCell(rn,4).value = r.date;
+      ws.getCell(rn,5).value = r.anteriorite;
+      ws.getCell(rn,6).value = r.commentaireMagasin;
+      ws.getCell(rn,2).numFmt = EURO_FMT; ws.getCell(rn,3).numFmt = EURO_FMT;
+      // Surligné en rouge : dépasse le seuil de provisionnement, à retrouver dans l'onglet Provisions.
+      if((r.anteriorite||0) > seuilProvision){
+        ws.getRow(rn).eachCell(c => { c.fill = {type:'pattern',pattern:'solid',fgColor:{argb:XL_COLORS.rustSoft}}; });
+      }
+    });
+
+    // --- Ligne Total, juste sous le tableau des dossiers antérieurs ---
+    if(anteriorityOnly.length > 0){
+      const antLastDataRow = antFirstDataRow + anteriorityOnly.length - 1;
+      const antTotalRow = antLastDataRow + 1;
+      const antOptSum = round2(anteriorityOnly.reduce((s,r)=>s+(r.montantOptimum||0),0));
+      const antCegSum = round2(anteriorityOnly.reduce((s,r)=>s+(r.montantCegid||0),0));
+      ws.getCell(antTotalRow,1).value = 'Total';
+      ws.getCell(antTotalRow,2).value = { formula:`SUM(B${antFirstDataRow}:B${antLastDataRow})`, result: antOptSum };
+      ws.getCell(antTotalRow,3).value = { formula:`SUM(C${antFirstDataRow}:C${antLastDataRow})`, result: antCegSum };
+      ws.getCell(antTotalRow,2).numFmt = EURO_FMT; ws.getCell(antTotalRow,3).numFmt = EURO_FMT;
+      ws.getRow(antTotalRow).eachCell({includeEmpty:true}, (c, colNum) => {
+        if(colNum > lastCol) return;
+        c.font = { bold:true };
+        c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.goldSoft} };
+      });
+    }
+
+    return { sheetName, recapStart, ecartsOnly, anteriorityOnly, sommeDetaillee, ecartResiduel };
   }
 
   // Un onglet d'écarts à un seul côté (CB, Virements) : pas de rapprochement Optimum,
-  // juste le rappel du total Cegid et le détail des lignes en attente.
+  // juste le rappel du total Cegid et le détail des lignes en attente, avec surlignage
+  // des dossiers qui dépassent le seuil de provisionnement.
   function writeOneSidedSheet(sheetName, title, categorie, cegInfo){
     if(!cegInfo) return;
     const lines = ecartLines(categorie);
-    const ws = XLSX.utils.aoa_to_sheet([[`${magasin} - Écarts ${title} ${closingDate}`]]);
+    const seuilProvision = 365;
+    const ws = wb.addWorksheet(sheetName);
+    const lastCol = 4;
+    ws.columns = [{width:26},{width:16},{width:14},{width:34}];
+    addTitleRow(ws, `${magasin} - Écarts ${title} ${closingDate}`, lastCol);
+
     const recapStart = 3;
-    XLSX.utils.sheet_add_aoa(ws, [[`Total ${title}`, null]], { origin: 'A' + recapStart });
-    ws['B' + recapStart] = { t:'n', f: `'${cegInfo.sheetName}'!${cegInfo.montantColLetter}${cegInfo.totalRow}`, v: cegInfo.sum, z: EURO_FMT };
+    ws.getCell(recapStart,1).value = `Total ${title}`;
+    ws.getCell(recapStart,1).font = { bold:true };
+    ws.getCell(recapStart,2).value = { formula:`'${cegInfo.sheetName}'!${cegInfo.montantColLetter}${cegInfo.totalRow}`, result: cegInfo.sum };
+    ws.getCell(recapStart,2).numFmt = EURO_FMT;
+    ws.getCell(recapStart,2).font = { bold:true };
 
-    const tableHeaderRow = recapStart + 2; // 1 ligne de rappel + 1 ligne blanche
+    const tableHeaderRow = recapStart + 2;
+    ['Client','Montant','Date','Commentaire'].forEach((h,i) => ws.getCell(tableHeaderRow,i+1).value = h);
+    styleHeaderRow(ws.getRow(tableHeaderRow), XL_COLORS.goldSoft, XL_COLORS.navy);
+
     const firstDataRow = tableHeaderRow + 1;
-    const lastDataRow = tableHeaderRow + lines.length;
-    const tableData = lines.map(r => ({
-      'Client': r.client, 'Montant': r.montantCegid, 'Date': r.date, 'Commentaire': r.commentaireMagasin
-    }));
-    XLSX.utils.sheet_add_json(ws, tableData, { origin: 'A' + tableHeaderRow, skipHeader: false });
-    applyEuroCol(ws, 'B', firstDataRow, lastDataRow);
+    lines.forEach((r,i) => {
+      const rn = firstDataRow+i;
+      ws.getCell(rn,1).value = r.client;
+      ws.getCell(rn,2).value = r.montantCegid;
+      ws.getCell(rn,2).numFmt = EURO_FMT;
+      ws.getCell(rn,3).value = r.date;
+      ws.getCell(rn,4).value = r.commentaireMagasin;
+      if((r.anteriorite||0) > seuilProvision){
+        ws.getRow(rn).eachCell(c => { c.fill = {type:'pattern',pattern:'solid',fgColor:{argb:XL_COLORS.rustSoft}}; });
+      }
+    });
 
-    ws['!cols'] = [{wch:26},{wch:16},{wch:14},{wch:34}];
-    ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:3} }];
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    if(lines.length > 0){
+      const lastDataRow = firstDataRow + lines.length - 1;
+      const totalRow = lastDataRow + 1;
+      ws.getCell(totalRow,1).value = 'Total';
+      ws.getCell(totalRow,2).value = { formula:`SUM(B${firstDataRow}:B${lastDataRow})`, result: round2(lines.reduce((s,r)=>s+(r.montantCegid||0),0)) };
+      ws.getCell(totalRow,2).numFmt = EURO_FMT;
+      ws.getRow(totalRow).eachCell({includeEmpty:true}, (c, colNum) => {
+        if(colNum > lastCol) return;
+        c.font = { bold:true };
+        c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.goldSoft} };
+      });
+    }
+
+    return { sheetName, recapStart, lines };
   }
 
-  writeTwoSidedSheet('Écarts TP', 'Tiers-payants', 'Tiers-payants', tpOpt, tpCeg);
-  writeTwoSidedSheet('Écarts Chèques', 'Chèques différés', 'Chèques différés', chqOpt, chqCeg);
-  writeOneSidedSheet('Écarts CB', 'CB', 'CB non encaissées', cb);
-  writeOneSidedSheet('Écarts Virements', 'Virements', 'Virements en attente', vir);
+  const ecartsTP = writeTwoSidedSheet('Écarts TP', 'Tiers-payants', 'Tiers-payants', tpOpt, tpCeg);
+  const ecartsChq = writeTwoSidedSheet('Écarts Chèques', 'Chèques différés', 'Chèques différés', chqOpt, chqCeg);
+  const ecartsCB = writeOneSidedSheet('Écarts CB', 'CB', 'CB non encaissées', cb);
+  const ecartsVir = writeOneSidedSheet('Écarts Virements', 'Virements', 'Virements en attente', vir);
+
+  // --- Onglet Synthèse : un visuel rapide, compte par compte, de ce qui est justifié ---
+  const synthRows = [
+    { label:'Tiers-payants', compte:'580301', optInfo:tpOpt, cegInfo:tpCeg, ecartsInfo:ecartsTP, twoSided:true },
+    { label:'Chèques différés', compte:'580100', optInfo:chqOpt, cegInfo:chqCeg, ecartsInfo:ecartsChq, twoSided:true },
+    { label:'CB non encaissées', compte:'580200', optInfo:null, cegInfo:cb, ecartsInfo:ecartsCB, twoSided:false },
+    { label:'Virements en attente', compte:'580400', optInfo:null, cegInfo:vir, ecartsInfo:ecartsVir, twoSided:false }
+  ].filter(r => r.ecartsInfo);
+
+  wsSynth.columns = [{width:22},{width:12},{width:16},{width:16},{width:14},{width:16},{width:16},{width:20}];
+  addTitleRow(wsSynth, `${magasin} - Synthèse des comptes clients ${closingDate}`, 8, 24);
+
+  const synthHeaderRow = 3;
+  ['Catégorie','N° compte','Total Optimum','Total Cegid','Écart','Écarts justifiés','Résidu à vérifier','Statut'].forEach((h,i) => wsSynth.getCell(synthHeaderRow,i+1).value = h);
+  styleHeaderRow(wsSynth.getRow(synthHeaderRow), XL_COLORS.paperTint, XL_COLORS.navy);
+
+  synthRows.forEach((r, i) => {
+    const row = synthHeaderRow + 1 + i;
+    wsSynth.getCell(row,1).value = r.label;
+    wsSynth.getCell(row,2).value = r.compte;
+    if(r.twoSided){
+      wsSynth.getCell(row,3).value = { formula:`'${r.optInfo.sheetName}'!${r.optInfo.montantColLetter}${r.optInfo.totalRow}`, result:r.optInfo.sum };
+      wsSynth.getCell(row,4).value = { formula:`'${r.cegInfo.sheetName}'!${r.cegInfo.montantColLetter}${r.cegInfo.totalRow}`, result:r.cegInfo.sum };
+      wsSynth.getCell(row,5).value = { formula:`C${row}-D${row}`, result: round2(r.optInfo.sum-r.cegInfo.sum) };
+
+      // Case "Écarts justifiés" cliquable : renvoie vers la section "Justification des écarts"
+      // de l'onglet correspondant. Un lien hypertexte Excel ne peut pas porter une formule
+      // recalculable en même temps — on affiche donc le montant déjà calculé (recalculé à
+      // chaque export) en texte, avec le lien.
+      const ecartsTarget = `A${r.ecartsInfo.recapStart+6}`;
+      const fCell = wsSynth.getCell(row,6);
+      fCell.value = { text: fmtMoney(r.ecartsInfo.sommeDetaillee), hyperlink: `#'${r.ecartsInfo.sheetName}'!${ecartsTarget}` };
+      fCell.font = { color:{argb:XL_COLORS.blue}, underline:true };
+
+      wsSynth.getCell(row,7).value = { formula:`'${r.ecartsInfo.sheetName}'!B${r.ecartsInfo.recapStart+4}`, result:r.ecartsInfo.ecartResiduel };
+      const residuAbs = Math.abs(r.ecartsInfo.ecartResiduel);
+      const statutVal = residuAbs < 0.005 ? 'OK' : (residuAbs <= 100 ? 'NS' : 'À VÉRIFIER');
+      wsSynth.getCell(row,8).value = { formula:`IF(ROUND(G${row},2)=0,"OK",IF(ABS(G${row})<=100,"NS","À VÉRIFIER"))`, result: statutVal };
+      [3,4,5,7].forEach(c => wsSynth.getCell(row,c).numFmt = EURO_FMT);
+    } else {
+      wsSynth.getCell(row,3).value = '—';
+      wsSynth.getCell(row,4).value = { formula:`'${r.cegInfo.sheetName}'!${r.cegInfo.montantColLetter}${r.cegInfo.totalRow}`, result:r.cegInfo.sum };
+      wsSynth.getCell(row,4).numFmt = EURO_FMT;
+      wsSynth.getCell(row,5).value = '—'; wsSynth.getCell(row,6).value = '—'; wsSynth.getCell(row,7).value = '—';
+      wsSynth.getCell(row,8).value = 'sans rapprochement Optimum';
+    }
+  });
+
+  const lastSynthRow = synthHeaderRow + synthRows.length;
+  if(synthRows.length > 0){
+    wsSynth.addConditionalFormatting({
+      ref: `H${synthHeaderRow+1}:H${lastSynthRow}`,
+      rules: [
+        { type:'containsText', operator:'containsText', text:'OK', priority:1, style:{ fill:{type:'pattern',pattern:'solid',bgColor:{argb:XL_COLORS.greenSoft}}, font:{color:{argb:XL_COLORS.green},bold:true} } },
+        { type:'containsText', operator:'containsText', text:'NS', priority:2, style:{ fill:{type:'pattern',pattern:'solid',bgColor:{argb:XL_COLORS.greenSoft}}, font:{color:{argb:XL_COLORS.green},bold:true} } },
+        { type:'containsText', operator:'containsText', text:'VÉRIFIER', priority:3, style:{ fill:{type:'pattern',pattern:'solid',bgColor:{argb:XL_COLORS.blueSoft}}, font:{color:{argb:XL_COLORS.blue},bold:true} } }
+      ]
+    });
+  }
+
+  // --- Onglet Provisions : dossiers antérieurs à provisionner (perte potentielle) ---
+  // Seuils : + de 2 ans (730 j) pour les tiers-payants, + d'un an (365 j) pour les chèques,
+  // CB et virements.
+  const SEUIL_PROVISION_TP = 730;
+  const SEUIL_PROVISION_AUTRES = 365;
+  const provisionRows = [];
+  if(ecartsTP) ecartsTP.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_TP).forEach(r =>
+    provisionRows.push({ categorie:'Tiers-payants', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'2 ans (730 j)', commentaire:r.commentaireMagasin }));
+  if(ecartsChq) ecartsChq.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+    provisionRows.push({ categorie:'Chèques différés', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+  if(ecartsCB) ecartsCB.lines.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+    provisionRows.push({ categorie:'CB non encaissées', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+  if(ecartsVir) ecartsVir.lines.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+    provisionRows.push({ categorie:'Virements en attente', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+
+  const wsProv = wb.addWorksheet('Provisions');
+  wsProv.columns = [{width:20},{width:26},{width:14},{width:12},{width:16},{width:16},{width:34}];
+  addTitleRow(wsProv, `${magasin} - Dossiers à provisionner ${closingDate}`, 7);
+
+  const provHeaderRow = 3;
+  ['Catégorie','Client','Montant','Date','Antériorité (jours)','Seuil applicable','Commentaire'].forEach((h,i) => wsProv.getCell(provHeaderRow,i+1).value = h);
+  styleHeaderRow(wsProv.getRow(provHeaderRow), XL_COLORS.rustSoft, XL_COLORS.navy);
+
+  const provFirstDataRow = provHeaderRow + 1;
+  provisionRows.forEach((r,i) => {
+    const rn = provFirstDataRow + i;
+    wsProv.getCell(rn,1).value = r.categorie;
+    wsProv.getCell(rn,2).value = r.client;
+    wsProv.getCell(rn,3).value = r.montant;
+    wsProv.getCell(rn,3).numFmt = EURO_FMT;
+    wsProv.getCell(rn,4).value = r.date;
+    wsProv.getCell(rn,5).value = r.anteriorite;
+    wsProv.getCell(rn,6).value = r.seuil;
+    wsProv.getCell(rn,7).value = r.commentaire;
+  });
+  const provTotalRow = provHeaderRow + provisionRows.length + 1;
+  const provTotalRowObj = wsProv.getRow(provTotalRow);
+  provTotalRowObj.getCell(2).value = 'TOTAL À PROVISIONNER';
+  provTotalRowObj.getCell(3).value = provisionRows.length > 0
+    ? { formula:`SUM(C${provFirstDataRow}:C${provHeaderRow+provisionRows.length})`, result: round2(provisionRows.reduce((s,r)=>s+(r.montant||0),0)) }
+    : 0;
+  provTotalRowObj.getCell(3).numFmt = EURO_FMT;
+  styleTotalRow(provTotalRowObj);
+  provTotalRowObj.getCell(3).fill = { type:'pattern', pattern:'solid', fgColor:{argb: provisionRows.length>0 ? XL_COLORS.rustSoft : XL_COLORS.greenSoft} };
 
   const today = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `Justification_cloture_${magasin.replace(/[^a-zA-Z0-9]+/g,'_')}_${today}.xlsx`);
+  await downloadWorkbook(wb, `Justification_cloture_${magasin.replace(/[^a-zA-Z0-9]+/g,'_')}_${today}.xlsx`);
 }
 </script>
 
