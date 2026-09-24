@@ -84,7 +84,7 @@
     max-width:640px;
   }
 
-  main{ max-width:1100px; margin:0 auto; padding:0 5vw; }
+  main{ max-width:1500px; margin:0 auto; padding:0 5vw; }
 
   section.block{
     background:var(--white);
@@ -165,6 +165,46 @@
     font-weight:400;
     color:var(--ink-soft);
   }
+
+  .unified-drop{
+    border:2px dashed var(--paper-line);
+    border-radius:8px;
+    padding:36px 24px;
+    text-align:center;
+    background:#FBFAF4;
+    transition:border-color .15s ease, background .15s ease;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+  }
+  .unified-drop.dragover{ border-color:var(--navy); background:#EAEFF6; }
+  .unified-drop-icon{ font-size:32px; line-height:1; }
+  .unified-drop-label{
+    font-family:"Inter",sans-serif; font-weight:600; font-size:14.5px; color:var(--navy-deep);
+  }
+  .unified-drop-desc{
+    font-family:"Inter",sans-serif; font-size:12.5px; color:var(--ink-soft); max-width:560px;
+  }
+  .unified-drop button.secondary{ margin-top:6px; }
+
+  .recognized-list{ margin-top:18px; display:flex; flex-direction:column; gap:8px; }
+  .recognized-item{
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    border:1px solid var(--paper-line); border-radius:6px;
+    padding:10px 14px; background:var(--white);
+  }
+  .recognized-item.unrecognized{ border-color:var(--rust); background:var(--rust-soft); }
+  .recognized-item .fname{
+    flex:1 1 220px; min-width:160px; font-family:"Inter",sans-serif; font-size:13px; color:var(--ink);
+    font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .recognized-item select{
+    font-family:"Inter",sans-serif; font-size:12.5px; padding:6px 8px;
+    border:1px solid var(--paper-line); border-radius:4px; background:var(--white);
+  }
+  .recognized-item .rec-status{ font-family:"Inter",sans-serif; font-size:12px; white-space:nowrap; }
+  .recognized-item .remove-btn{
+    background:none; border:none; color:var(--ink-soft); cursor:pointer; font-size:15px; padding:2px 6px;
+  }
+  .recognized-item .remove-btn:hover{ color:var(--rust); }
 
   .params{
     display:flex;
@@ -523,44 +563,15 @@
     <h2>1 — Importer les fichiers du magasin</h2>
     <p class="hint">Importez uniquement ce dont vous avez besoin : un seul rapprochement à la fois (par exemple les tiers-payants seuls) fonctionne très bien. Les fichiers Cegid doivent être exportés <strong>après lettrage</strong> : ils ne doivent contenir que les écritures non lettrées.</p>
 
-    <div class="upload-grid">
-      <div class="upload-slot" id="slot-tp-optimum" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'tpOptimum')">
-        <span class="label sans">Tiers-payants — Optimum</span>
-        <span class="desc sans">Liste des tiers-payants non soldés</span>
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(event,'tpOptimum')">
-        <div class="status sans">Glissez le fichier ici ou cliquez</div>
-      </div>
-      <div class="upload-slot" id="slot-tp-cegid" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'tpCegid')">
-        <span class="label sans">Tiers-payants — Cegid</span>
-        <span class="desc sans">Grand livre 580301, non lettré</span>
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(event,'tpCegid')">
-        <div class="status sans">Glissez le fichier ici ou cliquez</div>
-      </div>
-      <div class="upload-slot" id="slot-chq-optimum" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'chqOptimum')">
-        <span class="label sans">Chèques — Optimum</span>
-        <span class="desc sans">Chèques non remis en banque</span>
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(event,'chqOptimum')">
-        <div class="status sans">Glissez le fichier ici ou cliquez</div>
-      </div>
-      <div class="upload-slot" id="slot-chq-cegid" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'chqCegid')">
-        <span class="label sans">Chèques — Cegid</span>
-        <span class="desc sans">Grand livre 580100, non lettré</span>
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(event,'chqCegid')">
-        <div class="status sans">Glissez le fichier ici ou cliquez</div>
-      </div>
-      <div class="upload-slot optional" id="slot-vir-cegid" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'virCegid')">
-        <span class="label sans">Virements — Cegid</span>
-        <span class="desc sans">Grand livre 580400, non lettré — pas de rapprochement, simple ajout</span>
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(event,'virCegid')">
-        <div class="status sans">Glissez le fichier ici ou cliquez</div>
-      </div>
-      <div class="upload-slot optional" id="slot-cb-cegid" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event,'cbCegid')">
-        <span class="label sans">CB non encaissées — Cegid</span>
-        <span class="desc sans">Pas encore de format fourni — même logique que les virements</span>
-        <input type="file" accept=".xlsx,.xls" onchange="handleFile(event,'cbCegid')">
-        <div class="status sans">Glissez le fichier ici ou cliquez</div>
-      </div>
+    <div class="unified-drop" id="unifiedDrop" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleUnifiedDrop(event)">
+      <span class="unified-drop-icon">📂</span>
+      <span class="unified-drop-label">Glissez ici tous les fichiers du magasin, dans n'importe quel ordre</span>
+      <span class="unified-drop-desc">L'outil reconnaît automatiquement le type de chaque fichier (tiers-payants, chèques, avoirs, acomptes, virements, CB — Optimum comme Cegid). Vérifiez et corrigez si besoin juste en dessous.</span>
+      <input type="file" id="unifiedFileInput" accept=".xlsx,.xls" multiple style="display:none" onchange="handleUnifiedFiles(event.target.files); event.target.value='';">
+      <button type="button" class="secondary" onclick="document.getElementById('unifiedFileInput').click()">Ou cliquez pour parcourir</button>
     </div>
+
+    <div id="recognizedList" class="recognized-list" style="display:none"></div>
 
     <div class="params">
       <div>
@@ -592,7 +603,16 @@ const SUIVI_SYNC_URL = 'https://edgard-opticiens.app.n8n.cloud/webhook/rapproche
 const SLOT_TO_DOM = {
   tpOptimum:'slot-tp-optimum', tpCegid:'slot-tp-cegid',
   chqOptimum:'slot-chq-optimum', chqCegid:'slot-chq-cegid',
+  avoirsOptimum:'slot-avoirs-optimum', avoirsCegid:'slot-avoirs-cegid',
+  acomptesOptimum:'slot-acomptes-optimum', acomptesCegid:'slot-acomptes-cegid',
   virCegid:'slot-vir-cegid', cbCegid:'slot-cb-cegid'
+};
+const CATEGORY_LABELS = {
+  tpOptimum:'Tiers-payants — Optimum', tpCegid:'Tiers-payants — Cegid',
+  chqOptimum:'Chèques — Optimum', chqCegid:'Chèques — Cegid',
+  avoirsOptimum:'Avoirs — Optimum', avoirsCegid:'Avoirs — Cegid',
+  acomptesOptimum:'Acomptes — Optimum', acomptesCegid:'Acomptes — Cegid',
+  virCegid:'Virements — Cegid', cbCegid:'CB non encaissées — Cegid'
 };
 
 /* ============================= UTILITAIRES ============================= */
@@ -724,9 +744,32 @@ function extractNameParts(raw){
   return { surname:m[1].trim(), firstFrag:m[2].trim() };
 }
 
+// Extrait { surname, firstFrag } d'un libellé Cegid déjà nettoyé (ex. "GOLIETH Ca",
+// "Brion stenegre En"). Contrairement à extractNameParts (utilisée pour Optimum), on ne se
+// fie PAS à la casse : Cegid ne majuscule pas toujours le nom de famille en entier (ex.
+// "Brion stenegre" au lieu de "BRION STENEGRE"). Le dernier mot est quasi toujours le
+// prénom tronqué (1 à 4 lettres) ; tout ce qui précède est le nom de famille, quelle que
+// soit sa casse.
+function extractCegidNameParts(raw){
+  const cleaned = stripAccents(raw||'').replace(/[^A-Za-z\s\-]/g,' ').replace(/\s+/g,' ').trim();
+  if(!cleaned) return { surname:'', firstFrag:'' };
+  // Filtre les jetons vides ou réduits à un simple tiret (reste d'un séparateur du type
+  // "NOM Prenom - MotClé" une fois le mot-clé lui-même coupé).
+  const words = cleaned.split(' ').filter(w => w && w !== '-');
+  if(words.length === 0) return { surname:'', firstFrag:'' };
+  if(words.length === 1) return { surname: words[0].toUpperCase(), firstFrag:'' };
+  const firstFrag = words[words.length-1];
+  const surnameWords = words.slice(0, -1);
+  return { surname: surnameWords.join(' ').toUpperCase(), firstFrag: firstFrag.toUpperCase() };
+}
+
 // Nettoie un libellé Cegid pour ne garder que "NOM Xx" : coupe au premier mot-clé
 // d'action rencontré (peu importe l'ordre de la liste, on prend le plus proche du début).
-const CEGID_KEYWORDS = ['TIERS PAYANT', 'REGULARISATION', 'ENCAISSEMEN', 'VIRT', 'VIR ', '- ALEMRYS', 'A RECEV', 'RC GENERE', 'RC1'];
+// Mots-clés raccourcis au strict minimum : Cegid tronque le libellé à une largeur de colonne
+// fixe, donc plus le nom du client est long, plus le mot d'action qui suit est coupé court
+// (ex. "Encaissement vente" peut survivre en "Encaissem" seulement, voire moins). Un mot-clé
+// trop long ne serait alors jamais retrouvé et le libellé resterait mal découpé.
+const CEGID_KEYWORDS = ['TIERS', 'REGUL', 'ENCA', 'VIRT', 'VIR ', 'ALEMRYS', 'ALMERYS', 'RECEV', 'GENER', 'RC1', 'ANNUL', 'REGLE', 'ACOMP', 'REMISE'];
 function cleanCegidLibelle(raw){
   const stripped = stripAccents(raw||'');
   const upper = stripped.toUpperCase();
@@ -740,7 +783,38 @@ function cleanCegidLibelle(raw){
 }
 
 /* ============================= LECTURE FICHIERS ============================= */
-function processFile(file, key){
+// Devine à quel type de fichier on a affaire à partir de son contenu (pas de son nom,
+// peu fiable). Côté Cegid, le numéro de compte (colonne "Général") est un signal très sûr.
+// Côté Optimum, on se base sur les encadrés/en-têtes propres à chaque export.
+function detectFileCategory(rows){
+  const hIdxLedger = findHeaderRow(rows, ['libellé','débit','crédit']);
+  if(hIdxLedger !== -1){
+    const headers = rows[hIdxLedger].map(h => (h||'').toString().toLowerCase().trim());
+    const iGeneral = headers.indexOf('général');
+    if(iGeneral !== -1){
+      const COMPTE_TO_CATEGORY = { '580301':'tpCegid', '580100':'chqCegid', '419000':'avoirsCegid', '419100':'acomptesCegid', '580400':'virCegid', '580200':'cbCegid' };
+      for(let i = hIdxLedger+1; i<rows.length; i++){
+        const r = rows[i];
+        if(r && r[iGeneral]){
+          const compte = r[iGeneral].toString().trim();
+          if(COMPTE_TO_CATEGORY[compte]) return COMPTE_TO_CATEGORY[compte];
+          break;
+        }
+      }
+    }
+    return null; // grand livre Cegid mais compte non reconnu
+  }
+  if(findSectionRow(rows, /^Avoirs disponibles/i) !== -1) return 'avoirsOptimum';
+  if(findSectionRow(rows, /^Acomptes non regularises/i) !== -1) return 'acomptesOptimum';
+  if(findHeaderRow(rows, ['nom du client','montant rc']) !== -1) return 'tpOptimum';
+  if(findHeaderRow(rows, ['nom du client','date encaissement']) !== -1) return 'chqOptimum';
+  return null;
+}
+
+let recognizedFiles = []; // [{id, name, rows, category}]
+let recognizedIdSeq = 0;
+
+function processUnifiedFile(file){
   if(!file) return;
   if(!/\.xlsx?$/i.test(file.name)){
     alert('Fichier ignoré : "'+file.name+'" — seuls les fichiers .xlsx / .xls sont acceptés.');
@@ -751,33 +825,112 @@ function processFile(file, key){
     const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
-    files[key] = { name:file.name, rows };
-    const slot = document.getElementById(SLOT_TO_DOM[key]);
-    slot.classList.add('filled');
-    slot.querySelector('.status').textContent = '✓ ' + file.name;
-    checkReady();
+    const category = detectFileCategory(rows);
+    const id = ++recognizedIdSeq;
+    recognizedFiles.push({ id, name:file.name, rows, category });
+    assignRecognizedFile(id);
+    renderRecognizedList();
   };
   reader.readAsArrayBuffer(file);
 }
 
-function handleFile(evt, key){
-  processFile(evt.target.files[0], key);
+function handleUnifiedFiles(fileList){
+  Array.from(fileList || []).forEach(f => processUnifiedFile(f));
 }
 
-function handleDrop(evt, key){
+function handleUnifiedDrop(evt){
   evt.preventDefault();
-  const slot = document.getElementById(SLOT_TO_DOM[key]);
-  slot.classList.remove('dragover');
-  const file = evt.dataTransfer && evt.dataTransfer.files && evt.dataTransfer.files[0];
-  processFile(file, key);
+  document.getElementById('unifiedDrop').classList.remove('dragover');
+  const dtFiles = evt.dataTransfer && evt.dataTransfer.files;
+  Array.from(dtFiles || []).forEach(f => processUnifiedFile(f));
+}
+
+// Place (ou déplace) un fichier reconnu dans `files`, la structure lue par le reste de
+// l'outil — inchangée, donc tout ce qui suit (checkReady, runReconciliation...) continue
+// de fonctionner sans modification.
+function assignRecognizedFile(id){
+  const entry = recognizedFiles.find(f => f.id === id);
+  if(!entry) return;
+  Object.keys(files).forEach(k => { if(files[k] && files[k]._recId === id) delete files[k]; });
+  if(entry.category){
+    files[entry.category] = { name:entry.name, rows:entry.rows, _recId:id };
+  }
+  checkReady();
+}
+
+function changeRecognizedCategory(id, newCategory){
+  const entry = recognizedFiles.find(f => f.id === id);
+  if(!entry) return;
+  if(entry.category && files[entry.category] && files[entry.category]._recId === id) delete files[entry.category];
+  entry.category = newCategory || null;
+  assignRecognizedFile(id);
+  renderRecognizedList();
+}
+
+function removeRecognizedFile(id){
+  const entry = recognizedFiles.find(f => f.id === id);
+  if(entry && entry.category && files[entry.category] && files[entry.category]._recId === id) delete files[entry.category];
+  recognizedFiles = recognizedFiles.filter(f => f.id !== id);
+  checkReady();
+  renderRecognizedList();
+}
+
+function renderRecognizedList(){
+  const container = document.getElementById('recognizedList');
+  if(recognizedFiles.length === 0){ container.style.display = 'none'; container.innerHTML = ''; return; }
+  container.style.display = 'flex';
+  container.innerHTML = '';
+  recognizedFiles.forEach(entry => {
+    const div = document.createElement('div');
+    div.className = 'recognized-item' + (entry.category ? '' : ' unrecognized');
+
+    const fname = document.createElement('span');
+    fname.className = 'fname';
+    fname.textContent = entry.name;
+    fname.title = entry.name;
+    div.appendChild(fname);
+
+    const select = document.createElement('select');
+    const optNone = document.createElement('option');
+    optNone.value = '';
+    optNone.textContent = entry.category ? '— ignorer ce fichier —' : '— non reconnu, choisir —';
+    select.appendChild(optNone);
+    Object.entries(CATEGORY_LABELS).forEach(([key,label]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = label;
+      if(entry.category === key) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', () => changeRecognizedCategory(entry.id, select.value));
+    div.appendChild(select);
+
+    const status = document.createElement('span');
+    status.className = 'rec-status sans';
+    status.style.color = entry.category ? 'var(--ok)' : 'var(--rust)';
+    status.textContent = entry.category ? '✓ reconnu automatiquement' : 'à préciser manuellement';
+    div.appendChild(status);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-btn';
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'Retirer ce fichier';
+    removeBtn.addEventListener('click', () => removeRecognizedFile(entry.id));
+    div.appendChild(removeBtn);
+
+    container.appendChild(div);
+  });
 }
 
 function checkReady(){
   const tpReady = !!(files.tpOptimum && files.tpCegid);
   const chqReady = !!(files.chqOptimum && files.chqCegid);
+  const avoirsReady = !!(files.avoirsOptimum && files.avoirsCegid);
+  const acomptesReady = !!(files.acomptesOptimum && files.acomptesCegid);
   const virReady = !!files.virCegid;
   const cbReady = !!files.cbCegid;
-  document.getElementById('runBtn').disabled = !(tpReady || chqReady || virReady || cbReady);
+  document.getElementById('runBtn').disabled = !(tpReady || chqReady || avoirsReady || acomptesReady || virReady || cbReady);
 }
 
 /* ============================= PARSERS ============================= */
@@ -837,6 +990,62 @@ function parseOptimumCheques(rows){
   return { storeName, rows: out };
 }
 
+// Cherche, dans la 1ère colonne, la première ligne dont le texte correspond au motif donné
+// (insensible aux accents et à la casse).
+function findSectionRow(rows, regex, fromRow){
+  for(let i = fromRow||0; i<rows.length; i++){
+    const cell = rows[i] && rows[i][0];
+    if(cell && regex.test(stripAccents(cell.toString()))) return i;
+  }
+  return -1;
+}
+
+// Les exports Optimum "Avoirs" et "Acomptes" contiennent plusieurs encadrés à la suite
+// (générés, remboursés, utilisés/régularisés, disponibles/non régularisés...), la plupart
+// vides. On va chercher précisément l'encadré demandé par son titre, puis on lit ses lignes
+// jusqu'à la ligne "Total ...".
+function parseOptimumSection(rows, sectionRegex, totalRegex){
+  const storeName = (rows[0] && rows[0][0]) ? rows[0][0].toString() : 'Magasin';
+  const secIdx = findSectionRow(rows, sectionRegex);
+  if(secIdx === -1) throw new Error('Encadré attendu introuvable dans le fichier Optimum.');
+  const headerIdx = secIdx + 1;
+  const headers = (rows[headerIdx]||[]).map(h => (h||'').toString().toLowerCase().trim());
+  const iDate = headers.indexOf('date');
+  const iName = headers.indexOf('bénéficiaire') !== -1 ? headers.indexOf('bénéficiaire') : headers.indexOf('client');
+  const iMontant = headers.indexOf('montant');
+  const out = [];
+  for(let i = headerIdx+1; i<rows.length; i++){
+    const r = rows[i];
+    const firstCell = r && r[0];
+    if(firstCell && totalRegex.test(stripAccents(firstCell.toString()))) break;
+    if(!r || !r[iName]) continue;
+    const montant = Number(r[iMontant]);
+    out.push({
+      nom: r[iName].toString().trim(),
+      montant: isNaN(montant) ? 0 : montant,
+      date: iDate!==-1 ? parseFRDate(r[iDate]) : null,
+      matched:false
+    });
+  }
+  return { storeName, rows: out };
+}
+
+function parseOptimumAvoirs(rows){
+  // Uniquement l'encadré "Avoirs disponibles" — les montants y sont déjà négatifs,
+  // cohérent avec le sens crédit utilisé côté Cegid.
+  return parseOptimumSection(rows, /^Avoirs disponibles/i, /^Total avoirs disponibles/i);
+}
+
+function parseOptimumAcomptes(rows){
+  // Uniquement l'encadré "Acomptes non régularisés" (les acomptes encore ouverts).
+  // Optimum affiche ces montants en positif ; côté Cegid ils sont enregistrés au crédit
+  // (donc négatifs dans notre convention débit − crédit) : on inverse le signe ici pour
+  // que les deux côtés se comparent directement.
+  const res = parseOptimumSection(rows, /^Acomptes non regularises/i, /^Total Acomptes non regularises/i);
+  res.rows.forEach(r => { r.montant = -r.montant; });
+  return res;
+}
+
 function parseCegidLedger(rows){
   const hIdx = findHeaderRow(rows, ['libellé','débit','crédit']);
   if(hIdx===-1) throw new Error('Colonnes attendues introuvables dans le fichier Cegid.');
@@ -888,7 +1097,7 @@ function clusterCegidBySurname(cegidRows){
   const bySurname = {};
   cegidRows.forEach(c => {
     const cleaned = cleanCegidLibelle(c.libelle);
-    const parts = extractNameParts(cleaned);
+    const parts = extractCegidNameParts(cleaned);
     const surname = parts.surname || '(SANS NOM)';
     if(!bySurname[surname]) bySurname[surname] = [];
     bySurname[surname].push({ c, firstFrag: parts.firstFrag });
@@ -941,7 +1150,7 @@ function buildClientClusters(optimumRows, cegidRawLines){
   });
   cegidRawLines.forEach(c => {
     const cleaned = cleanCegidLibelle(c.libelle);
-    const parts = extractNameParts(cleaned);
+    const parts = extractCegidNameParts(cleaned);
     items.push({ side:'cegid', surname:parts.surname||'(SANS NOM)', firstFrag:parts.firstFrag, montant:c.montant, date:c.date, libelle:c.libelle });
   });
 
@@ -1096,8 +1305,12 @@ function runReconciliation(){
 
     const tpReady = !!(files.tpOptimum && files.tpCegid);
     const chqReady = !!(files.chqOptimum && files.chqCegid);
+    const avoirsReady = !!(files.avoirsOptimum && files.avoirsCegid);
+    const acomptesReady = !!(files.acomptesOptimum && files.acomptesCegid);
     const tpPartial = !!(files.tpOptimum || files.tpCegid) && !tpReady;
     const chqPartial = !!(files.chqOptimum || files.chqCegid) && !chqReady;
+    const avoirsPartial = !!(files.avoirsOptimum || files.avoirsCegid) && !avoirsReady;
+    const acomptesPartial = !!(files.acomptesOptimum || files.acomptesCegid) && !acomptesReady;
 
     recapRows = [];
     ambiguousResolved = [];
@@ -1111,6 +1324,8 @@ function runReconciliation(){
     let storeName = null;
     if(files.tpOptimum) storeName = parseOptimumTP(files.tpOptimum.rows).storeName;
     else if(files.chqOptimum) storeName = parseOptimumCheques(files.chqOptimum.rows).storeName;
+    else if(files.avoirsOptimum) storeName = parseOptimumAvoirs(files.avoirsOptimum.rows).storeName;
+    else if(files.acomptesOptimum) storeName = parseOptimumAcomptes(files.acomptesOptimum.rows).storeName;
 
     const banner = document.createElement('div');
     banner.className = 'store-banner';
@@ -1150,6 +1365,26 @@ function runReconciliation(){
       renderReconciled('Chèques différés', chqOpt.rows, chqCeg, tolerance, seuil, newCategoryBlock());
     } else if(chqPartial){
       partialWarning('Chèques');
+    }
+
+    if(avoirsReady){
+      const avoirsOpt = parseOptimumAvoirs(files.avoirsOptimum.rows);
+      const avoirsCeg = parseCegidLedger(files.avoirsCegid.rows);
+      avoirsOpt.rows.forEach(r => justifOptimumRows.push({ categorie:'Avoirs', client:r.nom, montant:r.montant, date:r.date }));
+      avoirsCeg.forEach(r => justifCegidRows.push({ categorie:'Avoirs', libelle:r.libelle, montant:r.montant, date:r.date }));
+      renderReconciled('Avoirs', avoirsOpt.rows, avoirsCeg, tolerance, seuil, newCategoryBlock());
+    } else if(avoirsPartial){
+      partialWarning('Avoirs');
+    }
+
+    if(acomptesReady){
+      const acomptesOpt = parseOptimumAcomptes(files.acomptesOptimum.rows);
+      const acomptesCeg = parseCegidLedger(files.acomptesCegid.rows);
+      acomptesOpt.rows.forEach(r => justifOptimumRows.push({ categorie:'Acomptes', client:r.nom, montant:r.montant, date:r.date }));
+      acomptesCeg.forEach(r => justifCegidRows.push({ categorie:'Acomptes', libelle:r.libelle, montant:r.montant, date:r.date }));
+      renderReconciled('Acomptes', acomptesOpt.rows, acomptesCeg, tolerance, seuil, newCategoryBlock());
+    } else if(acomptesPartial){
+      partialWarning('Acomptes');
     }
 
     if(files.virCegid){
@@ -1251,12 +1486,6 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
   `;
   container.appendChild(tally);
 
-  const filterHint = document.createElement('p');
-  filterHint.className = 'hint sans';
-  filterHint.style.margin = '6px 0 0 0';
-  filterHint.textContent = 'Cliquez sur une catégorie pour n\'afficher qu\'elle ; recliquez pour tout réafficher.';
-  container.appendChild(filterHint);
-
   // --- Tableau principal : construit avant la section ambiguë pour que les lignes validées
   // puissent y être ajoutées directement, mais affiché après elle dans la page. ---
   const table = document.createElement('table');
@@ -1307,13 +1536,6 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
 
   // --- Section ambiguë : même style de tableau que ci-dessous, avec une colonne à cocher. ---
   if(ambiguous.length){
-    const note = document.createElement('p');
-    note.className = 'hint sans';
-    note.innerHTML = '<strong>Ce que c\'est :</strong> pour ce ou ces clients, aucune combinaison automatique de lignes Cegid et de dossiers Optimum ne tombe exactement juste. '
-      + '<strong>Ce qu\'il faut faire :</strong> cochez les lignes qui correspondent au même événement réel (Cegid et/ou Optimum), vérifiez le total, ajoutez un commentaire si besoin, puis cliquez sur « Valider ». '
-      + 'Une fois validée, la ligne quitte cet encadré et rejoint le tableau ci-dessous si un écart persiste. Ce que vous laissez décoché repart comme une ligne à part. Si vous ne validez rien du tout, le cas reste visible tel quel dans l\'export final, marqué « à vérifier ».';
-    container.appendChild(note);
-
     ambiguous.forEach((a) => {
       const clusterRef = { categorie: title, cegidItems: a.cegidItems, optimumItems: a.optimumItems, resolved: false };
       unresolvedAmbiguousClusters.push(clusterRef);
@@ -1705,14 +1927,33 @@ async function exportJustification(){
   const tpCegRows  = rowsFor(justifCegidRows,   'Tiers-payants', 'libelle');
   const chqOptRows = rowsFor(justifOptimumRows, 'Chèques différés', 'client');
   const chqCegRows = rowsFor(justifCegidRows,   'Chèques différés', 'libelle');
+  const avoirsOptRows = rowsFor(justifOptimumRows, 'Avoirs', 'client');
+  const avoirsCegRows = rowsFor(justifCegidRows,   'Avoirs', 'libelle');
+  const acomptesOptRows = rowsFor(justifOptimumRows, 'Acomptes', 'client');
+  const acomptesCegRows = rowsFor(justifCegidRows,   'Acomptes', 'libelle');
   const cbRows     = rowsFor(justifCegidRows,   'CB non encaissées', 'libelle');
   const virRows    = rowsFor(justifCegidRows,   'Virements en attente', 'libelle');
 
-  let tpOpt=null, tpCeg=null, chqOpt=null, chqCeg=null, cb=null, vir=null;
+  // --- Onglets d'analyse créés en premier (donc positionnés juste après Synthèse), même si
+  // remplis plus loin dans la fonction : seules les listes brutes (Optimum/Cegid) sont
+  // reléguées à la fin du classeur, en matériel de référence. ---
+  const wsEcartsTP        = (tpOptRows.length||tpCegRows.length) ? wb.addWorksheet('Écarts TP') : null;
+  const wsEcartsChq       = (chqOptRows.length||chqCegRows.length) ? wb.addWorksheet('Écarts Chèques') : null;
+  const wsEcartsAvoirs    = (avoirsOptRows.length||avoirsCegRows.length) ? wb.addWorksheet('Écarts Avoirs') : null;
+  const wsEcartsAcomptes  = (acomptesOptRows.length||acomptesCegRows.length) ? wb.addWorksheet('Écarts Acomptes') : null;
+  const wsDetailCB        = cbRows.length ? wb.addWorksheet('Détail CB') : null;
+  const wsDetailVir       = virRows.length ? wb.addWorksheet('Détail Virements') : null;
+  const wsProv            = wb.addWorksheet('Provisions');
+
+  let tpOpt=null, tpCeg=null, chqOpt=null, chqCeg=null, avoirsOpt=null, avoirsCeg=null, acomptesOpt=null, acomptesCeg=null, cb=null, vir=null;
   if(tpOptRows.length)  tpOpt  = addListSheet(wb, 'TP Optimum',       `${magasin} - Attentes TP Optimum ${closingDate}`, tpOptRows, optCols, 'montant');
   if(tpCegRows.length)  tpCeg  = addListSheet(wb, 'TP Cegid',         `${magasin} - Attentes TP Cegid ${closingDate} - compte 580301`, tpCegRows, cegCols, 'montant');
   if(chqOptRows.length) chqOpt = addListSheet(wb, 'Chèques Optimum', `${magasin} - Chèques différés Optimum ${closingDate}`, chqOptRows, optCols, 'montant');
   if(chqCegRows.length) chqCeg = addListSheet(wb, 'Chèques Cegid',   `${magasin} - Chèques différés Cegid ${closingDate} - compte 580100`, chqCegRows, cegCols, 'montant');
+  if(avoirsOptRows.length) avoirsOpt = addListSheet(wb, 'Avoirs Optimum', `${magasin} - Avoirs disponibles Optimum ${closingDate}`, avoirsOptRows, optCols, 'montant');
+  if(avoirsCegRows.length) avoirsCeg = addListSheet(wb, 'Avoirs Cegid',   `${magasin} - Avoirs Cegid ${closingDate} - compte 419000`, avoirsCegRows, cegCols, 'montant');
+  if(acomptesOptRows.length) acomptesOpt = addListSheet(wb, 'Acomptes Optimum', `${magasin} - Acomptes non régularisés Optimum ${closingDate}`, acomptesOptRows, optCols, 'montant');
+  if(acomptesCegRows.length) acomptesCeg = addListSheet(wb, 'Acomptes Cegid',   `${magasin} - Acomptes Cegid ${closingDate} - compte 419100`, acomptesCegRows, cegCols, 'montant');
   if(cbRows.length)     cb     = addListSheet(wb, 'CB',              `${magasin} - CB ${closingDate} - compte 580200`, cbRows, cegCols, 'montant');
   if(virRows.length)    vir    = addListSheet(wb, 'Virements',       `${magasin} - Virements en attente ${closingDate} - compte 580400`, virRows, cegCols, 'montant');
 
@@ -1739,14 +1980,14 @@ async function exportJustification(){
   // Un onglet d'écarts à deux côtés (TP, Chèques) : rappel Optimum/Cegid/écart en formules,
   // puis deux tableaux colorés — écarts de montant (rouge) et dossiers antérieurs (doré),
   // avec surlignage des dossiers qui dépassent le seuil de provisionnement.
-  function writeTwoSidedSheet(sheetName, title, categorie, optInfo, cegInfo){
-    if(!optInfo && !cegInfo) return;
+  // `ws` est déjà créé (pour tenir sa place dans l'ordre des onglets) : on le remplit ici.
+  function writeTwoSidedSheet(ws, title, categorie, optInfo, cegInfo){
+    if(!ws || (!optInfo && !cegInfo)) return;
     const allLines = ecartLines(categorie);
     const ecartsOnly = allLines.filter(r => !(r.motif||'').includes('antériorité'));
     const anteriorityOnly = allLines.filter(r => (r.motif||'').includes('antériorité'));
     const seuilProvision = categorie === 'Tiers-payants' ? 730 : 365;
 
-    const ws = wb.addWorksheet(sheetName);
     const lastCol = 7;
     ws.columns = [{width:26},{width:16},{width:16},{width:12},{width:12},{width:26},{width:34}];
     addTitleRow(ws, `${magasin} - Écarts ${title} ${closingDate}`, lastCol);
@@ -1869,20 +2110,20 @@ async function exportJustification(){
       });
     }
 
-    return { sheetName, recapStart, ecartsOnly, anteriorityOnly, sommeDetaillee, ecartResiduel };
+    return { sheetName: ws.name, recapStart, ecartsOnly, anteriorityOnly, sommeDetaillee, ecartResiduel };
   }
 
   // Un onglet d'écarts à un seul côté (CB, Virements) : pas de rapprochement Optimum,
   // juste le rappel du total Cegid et le détail des lignes en attente, avec surlignage
   // des dossiers qui dépassent le seuil de provisionnement.
-  function writeOneSidedSheet(sheetName, title, categorie, cegInfo){
-    if(!cegInfo) return;
+  // `ws` est déjà créé (pour tenir sa place dans l'ordre des onglets) : on le remplit ici.
+  function writeOneSidedSheet(ws, title, categorie, cegInfo){
+    if(!ws || !cegInfo) return;
     const lines = ecartLines(categorie);
     const seuilProvision = 365;
-    const ws = wb.addWorksheet(sheetName);
     const lastCol = 4;
     ws.columns = [{width:26},{width:16},{width:14},{width:34}];
-    addTitleRow(ws, `${magasin} - Écarts ${title} ${closingDate}`, lastCol);
+    addTitleRow(ws, `${magasin} - Détail ${title} ${closingDate}`, lastCol);
 
     const recapStart = 3;
     ws.getCell(recapStart,1).value = `Total ${title}`;
@@ -1921,18 +2162,22 @@ async function exportJustification(){
       });
     }
 
-    return { sheetName, recapStart, lines };
+    return { sheetName: ws.name, recapStart, lines };
   }
 
-  const ecartsTP = writeTwoSidedSheet('Écarts TP', 'Tiers-payants', 'Tiers-payants', tpOpt, tpCeg);
-  const ecartsChq = writeTwoSidedSheet('Écarts Chèques', 'Chèques différés', 'Chèques différés', chqOpt, chqCeg);
-  const ecartsCB = writeOneSidedSheet('Écarts CB', 'CB', 'CB non encaissées', cb);
-  const ecartsVir = writeOneSidedSheet('Écarts Virements', 'Virements', 'Virements en attente', vir);
+  const ecartsTP = writeTwoSidedSheet(wsEcartsTP, 'Tiers-payants', 'Tiers-payants', tpOpt, tpCeg);
+  const ecartsChq = writeTwoSidedSheet(wsEcartsChq, 'Chèques différés', 'Chèques différés', chqOpt, chqCeg);
+  const ecartsAvoirs = writeTwoSidedSheet(wsEcartsAvoirs, 'Avoirs', 'Avoirs', avoirsOpt, avoirsCeg);
+  const ecartsAcomptes = writeTwoSidedSheet(wsEcartsAcomptes, 'Acomptes', 'Acomptes', acomptesOpt, acomptesCeg);
+  const ecartsCB = writeOneSidedSheet(wsDetailCB, 'CB', 'CB non encaissées', cb);
+  const ecartsVir = writeOneSidedSheet(wsDetailVir, 'Virements', 'Virements en attente', vir);
 
   // --- Onglet Synthèse : un visuel rapide, compte par compte, de ce qui est justifié ---
   const synthRows = [
     { label:'Tiers-payants', compte:'580301', optInfo:tpOpt, cegInfo:tpCeg, ecartsInfo:ecartsTP, twoSided:true },
     { label:'Chèques différés', compte:'580100', optInfo:chqOpt, cegInfo:chqCeg, ecartsInfo:ecartsChq, twoSided:true },
+    { label:'Avoirs', compte:'419000', optInfo:avoirsOpt, cegInfo:avoirsCeg, ecartsInfo:ecartsAvoirs, twoSided:true },
+    { label:'Acomptes', compte:'419100', optInfo:acomptesOpt, cegInfo:acomptesCeg, ecartsInfo:ecartsAcomptes, twoSided:true },
     { label:'CB non encaissées', compte:'580200', optInfo:null, cegInfo:cb, ecartsInfo:ecartsCB, twoSided:false },
     { label:'Virements en attente', compte:'580400', optInfo:null, cegInfo:vir, ecartsInfo:ecartsVir, twoSided:false }
   ].filter(r => r.ecartsInfo);
@@ -1990,20 +2235,26 @@ async function exportJustification(){
 
   // --- Onglet Provisions : dossiers antérieurs à provisionner (perte potentielle) ---
   // Seuils : + de 2 ans (730 j) pour les tiers-payants, + d'un an (365 j) pour les chèques,
-  // CB et virements.
+  // CB et virements. Avoirs et acomptes sont listés à part, pour information seulement :
+  // ce sont des soldes déjà en notre faveur (ou dus au client), pas une perte potentielle
+  // au même titre que les autres catégories, donc ils ne rentrent pas dans le total provisionné.
   const SEUIL_PROVISION_TP = 730;
   const SEUIL_PROVISION_AUTRES = 365;
   const provisionRows = [];
+  const infoRows = [];
   if(ecartsTP) ecartsTP.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_TP).forEach(r =>
     provisionRows.push({ categorie:'Tiers-payants', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'2 ans (730 j)', commentaire:r.commentaireMagasin }));
   if(ecartsChq) ecartsChq.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
     provisionRows.push({ categorie:'Chèques différés', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+  if(ecartsAvoirs) ecartsAvoirs.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+    infoRows.push({ categorie:'Avoirs', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+  if(ecartsAcomptes) ecartsAcomptes.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+    infoRows.push({ categorie:'Acomptes', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
   if(ecartsCB) ecartsCB.lines.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
     provisionRows.push({ categorie:'CB non encaissées', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
   if(ecartsVir) ecartsVir.lines.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
     provisionRows.push({ categorie:'Virements en attente', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
 
-  const wsProv = wb.addWorksheet('Provisions');
   wsProv.columns = [{width:20},{width:26},{width:14},{width:12},{width:16},{width:16},{width:34}];
   addTitleRow(wsProv, `${magasin} - Dossiers à provisionner ${closingDate}`, 7);
 
@@ -2032,6 +2283,41 @@ async function exportJustification(){
   provTotalRowObj.getCell(3).numFmt = EURO_FMT;
   styleTotalRow(provTotalRowObj);
   provTotalRowObj.getCell(3).fill = { type:'pattern', pattern:'solid', fgColor:{argb: provisionRows.length>0 ? XL_COLORS.rustSoft : XL_COLORS.greenSoft} };
+
+  // --- Section à part, pour information seulement : avoirs et acomptes anciens, non inclus
+  // dans le total ci-dessus (ce ne sont pas des pertes potentielles au même sens).
+  if(infoRows.length > 0){
+    const infoTitleRow = provTotalRow + 2;
+    wsProv.mergeCells(infoTitleRow,1,infoTitleRow,7);
+    const infoTitleCell = wsProv.getCell(infoTitleRow,1);
+    infoTitleCell.value = 'Avoirs et acomptes anciens — pour information, non inclus dans le total ci-dessus';
+    infoTitleCell.font = { bold:true, color:{argb:XL_COLORS.white} };
+    infoTitleCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.gold} };
+
+    const infoHeaderRow = infoTitleRow + 1;
+    ['Catégorie','Client','Montant','Date','Antériorité (jours)','Seuil applicable','Commentaire'].forEach((h,i) => wsProv.getCell(infoHeaderRow,i+1).value = h);
+    styleHeaderRow(wsProv.getRow(infoHeaderRow), XL_COLORS.goldSoft, XL_COLORS.navy);
+
+    const infoFirstDataRow = infoHeaderRow + 1;
+    infoRows.forEach((r,i) => {
+      const rn = infoFirstDataRow + i;
+      wsProv.getCell(rn,1).value = r.categorie;
+      wsProv.getCell(rn,2).value = r.client;
+      wsProv.getCell(rn,3).value = r.montant;
+      wsProv.getCell(rn,3).numFmt = EURO_FMT;
+      wsProv.getCell(rn,4).value = r.date;
+      wsProv.getCell(rn,5).value = r.anteriorite;
+      wsProv.getCell(rn,6).value = r.seuil;
+      wsProv.getCell(rn,7).value = r.commentaire;
+    });
+    const infoTotalRow = infoFirstDataRow + infoRows.length;
+    const infoTotalRowObj = wsProv.getRow(infoTotalRow);
+    infoTotalRowObj.getCell(2).value = 'Total (pour info)';
+    infoTotalRowObj.getCell(3).value = { formula:`SUM(C${infoFirstDataRow}:C${infoTotalRow-1})`, result: round2(infoRows.reduce((s,r)=>s+(r.montant||0),0)) };
+    infoTotalRowObj.getCell(3).numFmt = EURO_FMT;
+    styleTotalRow(infoTotalRowObj);
+    infoTotalRowObj.getCell(3).fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.goldSoft} };
+  }
 
   const today = new Date().toISOString().slice(0,10);
   await downloadWorkbook(wb, `Justification_cloture_${magasin.replace(/[^a-zA-Z0-9]+/g,'_')}_${today}.xlsx`);
