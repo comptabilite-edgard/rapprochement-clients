@@ -808,7 +808,8 @@ function detectFileCategory(rows){
   const hIdxLedger = findHeaderRow(rows, ['libellé','débit','crédit']);
   if(hIdxLedger !== -1){
     const headers = rows[hIdxLedger].map(h => (h||'').toString().toLowerCase().trim());
-    const iGeneral = headers.indexOf('général');
+    let iGeneral = headers.indexOf('général');
+    if(iGeneral === -1) iGeneral = headers.indexOf('compte général');
     if(iGeneral !== -1){
       const COMPTE_TO_CATEGORY = { '580301':'tpCegid', '580100':'chqCegid', '419000':'avoirsCegid', '419100':'acomptesCegid', '580400':'virCegid', '580200':'cbCegid' };
       for(let i = hIdxLedger+1; i<rows.length; i++){
@@ -1100,9 +1101,8 @@ function parseCegidLedger(rows){
     if(cumulMatch){ lastDate = parseFRDate(cumulMatch[1]) || lastDate; continue; }
     if(/^total/i.test(lib.trim())) continue; // "Total des A-Nouveaux", "Total du compte ..."
 
-    if(iLettr!==-1 && r[iLettr] && r[iLettr].toString().trim() !== '' && r[iLettr].toString().trim() !== '---'){
-      continue; // déjà lettré, ne devrait pas apparaître mais on filtre par sécurité
-    }
+    // Une écriture lettrée (code dans 'Lettr.') est lettrée avec une écriture postérieure à la date de justification :
+    // elle fait donc bien partie du solde à la date demandée et reste prise en compte.
 
     // La date de la ligne se trouve toujours en colonne A du fichier Cegid.
     const rowDate = parseFRDate(r[0]);
@@ -2364,8 +2364,7 @@ async function exportJustification(){
     infoTotalRowObj.getCell(3).fill = { type:'pattern', pattern:'solid', fgColor:{argb:XL_COLORS.goldSoft} };
   }
 
-  const today = new Date().toISOString().slice(0,10);
-  await downloadWorkbook(wb, `Justification_cloture_${magasin.replace(/[^a-zA-Z0-9]+/g,'_')}_${today}.xlsx`);
+  await downloadWorkbook(wb, `${magasin.replace(/[\\/:*?"<>|]+/g,'-')}-Justification clients au ${closingDate.replace(/[\\/:*?"<>|]+/g,'.')}.xlsx`);
 }
 </script>
 
