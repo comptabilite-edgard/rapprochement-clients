@@ -630,8 +630,9 @@ function isValidDate(d){
 }
 function parseFRDate(v){
   if(v===null||v===undefined||v==='') return null;
-  if(v instanceof Date) return isValidDate(v) ? v : null;
+  if(v instanceof Date) return (isValidDate(v) && v.getFullYear() >= 2000) ? v : null;
   if(typeof v === 'number'){
+    if(!isFinite(v) || v < 36526) return null; // vide / NaN / avant 2000 : pas une vraie date
     const d = XLSX.SSF.parse_date_code(v);
     if(!d) return null;
     const dt = new Date(d.y, d.m-1, d.d);
@@ -1090,6 +1091,7 @@ function parseCegidLedger(rows){
   const iRef = headers.indexOf('référence');
   const iLettr = headers.indexOf('lettr.');
   const out = [];
+  let hasOwnDates = false; // false = export sans colonne Date renseignée (ex. CB, virements)
   let lastDate = null; // Cegid ne réimprime pas la date à chaque ligne : on la reporte de la dernière ligne datée
   for(let i=hIdx+1;i<rows.length;i++){
     const r = rows[i];
@@ -1106,7 +1108,7 @@ function parseCegidLedger(rows){
 
     // La date de la ligne se trouve toujours en colonne A du fichier Cegid.
     const rowDate = parseFRDate(r[0]);
-    if(rowDate) lastDate = rowDate;
+    if(rowDate){ lastDate = rowDate; hasOwnDates = true; }
 
     const debit = Number(r[iDebit])||0;
     const credit = Number(r[iCredit])||0;
@@ -1118,6 +1120,9 @@ function parseCegidLedger(rows){
       matched:false
     });
   }
+  // Export sans aucune date de ligne : la seule date du fichier est celle du "Cumul au ..." (début de période),
+  // qui n'est PAS la date des écritures -> on laisse les dates vides plutôt que d'afficher une date fausse.
+  if(!hasOwnDates) out.forEach(o => { o.date = null; });
   return out;
 }
 
@@ -2001,6 +2006,17 @@ async function exportJustification(){
   if(acomptesCegRows.length) acomptesCeg = addListSheet(wb, 'Acomptes Cegid',   `${magasin} - Acomptes Cegid ${closingDate} - compte 419100`, acomptesCegRows, cegCols, 'montant');
   if(cbRows.length)     cb     = addListSheet(wb, 'CB',              `${magasin} - CB ${closingDate} - compte 580200`, cbRows, cegCols, 'montant');
   if(virRows.length)    vir    = addListSheet(wb, 'Virements',       `${magasin} - Virements en attente ${closingDate} - compte 580400`, virRows, cegCols, 'montant');
+
+  // Si un seul côté d'une catégorie a des lignes (ex. avoirs Optimum tous utilisés -> encadré vide),
+  // on crée quand même l'onglet de l'autre côté, vide (total 0), pour que les formules et la synthèse restent cohérentes.
+  if(wsEcartsTP && !tpOpt)  tpOpt  = addListSheet(wb, 'TP Optimum',       `${magasin} - Attentes TP Optimum ${closingDate}`, [], optCols, 'montant');
+  if(wsEcartsTP && !tpCeg)  tpCeg  = addListSheet(wb, 'TP Cegid',         `${magasin} - Attentes TP Cegid ${closingDate} - compte 580301`, [], cegCols, 'montant');
+  if(wsEcartsChq && !chqOpt) chqOpt = addListSheet(wb, 'Chèques Optimum', `${magasin} - Chèques différés Optimum ${closingDate}`, [], optCols, 'montant');
+  if(wsEcartsChq && !chqCeg) chqCeg = addListSheet(wb, 'Chèques Cegid',   `${magasin} - Chèques différés Cegid ${closingDate} - compte 580100`, [], cegCols, 'montant');
+  if(wsEcartsAvoirs && !avoirsOpt) avoirsOpt = addListSheet(wb, 'Avoirs Optimum', `${magasin} - Avoirs disponibles Optimum ${closingDate}`, [], optCols, 'montant');
+  if(wsEcartsAvoirs && !avoirsCeg) avoirsCeg = addListSheet(wb, 'Avoirs Cegid',   `${magasin} - Avoirs Cegid ${closingDate} - compte 419000`, [], cegCols, 'montant');
+  if(wsEcartsAcomptes && !acomptesOpt) acomptesOpt = addListSheet(wb, 'Acomptes Optimum', `${magasin} - Acomptes non régularisés Optimum ${closingDate}`, [], optCols, 'montant');
+  if(wsEcartsAcomptes && !acomptesCeg) acomptesCeg = addListSheet(wb, 'Acomptes Cegid',   `${magasin} - Acomptes Cegid ${closingDate} - compte 419100`, [], cegCols, 'montant');
 
   // --- Onglets d'écarts, un par type d'encaissement ---
   function ecartLines(categorie){
