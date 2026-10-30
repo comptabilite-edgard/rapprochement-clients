@@ -369,6 +369,7 @@
   table.data tr.row-absent-cegid:hover{ background:#E7CDA3; }
   table.data tr.row-absent-optimum{ background:var(--plum-soft); }
   table.data tr.row-absent-optimum:hover{ background:#DBC7E1; }
+  table.data tr.row-non-liste{ background:var(--amber-soft); }
   table.data tr.row-anteriorite{ background:var(--amber-soft); }
   table.data tr.row-anteriorite:hover{ background:#EBDDB4; }
   table.data td.num{ text-align:right; font-variant-numeric:tabular-nums; }
@@ -989,15 +990,28 @@ function parseOptimumTP(rows){
   return { storeName, rows: out };
 }
 
+// Statut "non listé" (fichier chèques Optimum) : le chèque est présent physiquement mais n'est pas renseigné dans Optimum.
+function chqIsNonListe(st){ return /non\s*list/i.test(stripAccents((st||'').toString())); }
+function chqNote(items){
+  const parts = [];
+  (items||[]).forEach(o => {
+    if(!o) return;
+    if(chqIsNonListe(o.statut)) parts.push('Chèque présent physiquement, non renseigné dans Optimum');
+    if(o.commentaire) parts.push('Commentaire Optimum : ' + o.commentaire);
+  });
+  return Array.from(new Set(parts)).join(' — ');
+}
+
 function parseOptimumCheques(rows){
   let storeName = (rows[0] && rows[0][0]) ? rows[0][0].toString() : 'Magasin';
   let hIdx = findHeaderRow(rows, ['nom du client','montant']);
-  let iNom, iMontant, iDate;
+  let iNom, iMontant, iDate, iStatut = -1, iComm = -1;
   if(hIdx!==-1){
     const headers = rows[hIdx].map(h => (h||'').toString().toLowerCase().trim());
     iNom = headers.indexOf('nom du client');
     iMontant = headers.indexOf('montant');
     iDate = headers.indexOf('date encaissement');
+    iStatut = headers.indexOf('statut'); iComm = headers.indexOf('commentaire');
   } else {
     // Format alternatif : colonnes repérées par synonymes
     hIdx = findFlexibleChequeHeader(rows);
@@ -1005,6 +1019,7 @@ function parseOptimumCheques(rows){
     const hs = rows[hIdx].map(normHeader);
     const pick = keys => { for(const k of keys.map(stripAccents)){ const i = hs.indexOf(k); if(i!==-1) return i; } return -1; };
     iNom = pick(CHQ_NAME_KEYS); iMontant = pick(CHQ_AMOUNT_KEYS); iDate = pick(CHQ_DATE_KEYS);
+    iStatut = hs.indexOf('statut'); iComm = hs.indexOf('commentaire');
     if(hIdx===0) storeName = null; // pas de ligne de titre magasin dans ce format
   }
   const out = [];
@@ -1019,6 +1034,8 @@ function parseOptimumCheques(rows){
       nom: r[iNom].toString().trim(),
       montant: isNaN(montant) ? 0 : montant,
       date: iDate!==-1 ? parseFRDate(r[iDate]) : null,
+      statut: iStatut!==-1 && r[iStatut]!=null ? r[iStatut].toString().trim() : '',
+      commentaire: iComm!==-1 && r[iComm]!=null ? r[iComm].toString().trim() : '',
       matched:false
     });
   }
@@ -1184,7 +1201,7 @@ function buildClientClusters(optimumRows, cegidRawLines){
   const items = [];
   optimumRows.forEach(o => {
     const parts = extractNameParts(o.nom);
-    items.push({ side:'optimum', surname:parts.surname, firstFrag:parts.firstFrag, montant:o.montant, date:o.date, nom:o.nom });
+    items.push({ side:'optimum', surname:parts.surname, firstFrag:parts.firstFrag, montant:o.montant, date:o.date, nom:o.nom, statut:o.statut, commentaire:o.commentaire });
   });
   cegidRawLines.forEach(c => {
     const cleaned = cleanCegidLibelle(c.libelle);
@@ -1296,7 +1313,9 @@ function matchSets(optimumRows, cegidRawLines, tolerance){
       const optimumCombined = {
         nom: optimumList.length > 1 ? optimumList[0].nom + ' (' + optimumList.length + ' dossiers)' : optimumList[0].nom,
         montant: optimumList.reduce((s,i) => s + i.montant, 0),
-        date: earliestDate(optimumList)
+        date: earliestDate(optimumList),
+        note: chqNote(optimumList),
+        nonListe: optimumList.some(i => chqIsNonListe(i.statut))
       };
       matches.push({ cegid: cegidCombined, optimum: optimumCombined, confidence: (cegidList.length + optimumList.length > 2) ? 'somme' : 'high' });
     });
@@ -1307,11 +1326,11 @@ function matchSets(optimumRows, cegidRawLines, tolerance){
       // plusieurs fois la même correspondance sur des lignes différentes.
       ambiguous.push({
         cegidItems: oc.map(c => ({ montant:c.montant, date:c.date, libelle:c.libelle })),
-        optimumItems: oo.map(o => ({ nom:o.nom, montant:o.montant, date:o.date }))
+        optimumItems: oo.map(o => ({ nom:o.nom, montant:o.montant, date:o.date, statut:o.statut, commentaire:o.commentaire }))
       });
     } else {
       oc.forEach(c => onlyCegid.push({ surname:c.surname, firstFrag:c.firstFrag, montant:c.montant, date:c.date, libelle:c.libelle }));
-      oo.forEach(o => onlyOptimum.push({ nom:o.nom, montant:o.montant, date:o.date }));
+      oo.forEach(o => onlyOptimum.push({ nom:o.nom, montant:o.montant, date:o.date, statut:o.statut, commentaire:o.commentaire }));
     }
   });
 
@@ -1410,7 +1429,7 @@ function runReconciliation(){
     if(chqReady){
       const chqOpt = parseOptimumCheques(files.chqOptimum.rows);
       const chqCeg = parseCegidLedger(files.chqCegid.rows);
-      chqOpt.rows.forEach(r => justifOptimumRows.push({ categorie:'Chèques différés', client:r.nom, montant:r.montant, date:r.date }));
+      chqOpt.rows.forEach(r => justifOptimumRows.push({ categorie:'Chèques différés', client:r.nom, montant:r.montant, date:r.date, statut:r.statut, commentaire:r.commentaire }));
       chqCeg.forEach(r => justifCegidRows.push({ categorie:'Chèques différés', libelle:r.libelle, montant:r.montant, date:r.date }));
       renderReconciled('Chèques différés', chqOpt.rows, chqCeg, tolerance, seuil, newCategoryBlock());
     } else if(chqPartial){
@@ -1488,10 +1507,11 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
     const isAnomaly = Math.abs(ecart) > tolerance;
     const date = m.optimum.date || m.cegid.date;
     const age = daysSince(date);
+    const nt = m.optimum.note ? ' — ' + m.optimum.note : '';
 
     if(isAnomaly){
       // Écart de montant : l'antériorité n'entre pas en compte, uniquement le montant.
-      problemRows.push({ type:'ecart-montant', client:m.optimum.nom, montantOptimum:m.optimum.montant, montantCegid:m.cegid.montant, ecart, date, age, statut:'écart de montant' });
+      problemRows.push({ type:'ecart-montant', client:m.optimum.nom, montantOptimum:m.optimum.montant, montantCegid:m.cegid.montant, ecart, date, age, statut:'écart de montant' + nt });
       ecartMontantCount++;
       return;
     }
@@ -1499,8 +1519,11 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
     const isAging = age!==null && age > seuil;
     if(isAging){
       // Dossier identique des deux côtés, mais ouvert depuis trop longtemps.
-      problemRows.push({ type:'anteriorite', client:m.optimum.nom, montantOptimum:m.optimum.montant, montantCegid:m.cegid.montant, ecart:0, date, age, statut:'antériorité (dossier identique)' });
+      problemRows.push({ type:'anteriorite', client:m.optimum.nom, montantOptimum:m.optimum.montant, montantCegid:m.cegid.montant, ecart:0, date, age, statut:'antériorité (dossier identique)' + nt });
       anterioriteCount++;
+    } else if(m.optimum.nonListe || m.optimum.note){
+      // Dossier concordant mais chèque non renseigné dans Optimum / commentaire : on le remonte dans l'explication des écarts.
+      problemRows.push({ type:'non-liste', client:m.optimum.nom, montantOptimum:m.optimum.montant, montantCegid:m.cegid.montant, ecart:0, date, age, statut:m.optimum.note });
     } else {
       okCount++;
     }
@@ -1510,7 +1533,7 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
     if(Math.abs(o.montant) <= tolerance) return; // montant négligeable, rien à remonter
     problemRows.push({
       type:'absent-cegid', client:o.nom, montantOptimum:o.montant, montantCegid:null, ecart:null,
-      date:o.date, age:daysSince(o.date), statut:'absent côté Cegid (déjà lettré ?)'
+      date:o.date, age:daysSince(o.date), statut:'absent côté Cegid (déjà lettré ?)' + (chqNote([o]) ? ' — ' + chqNote([o]) : '')
     });
     absentCegidCount++;
   });
@@ -1681,7 +1704,7 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
               type: isAnomaly ? 'ecart-montant' : 'anteriorite',
               client: nomAffiche, montantOptimum:oSum, montantCegid:cSum,
               ecart: isAnomaly?ecart:0, date, age,
-              statut: (isAnomaly ? 'écart de montant' : 'antériorité (dossier identique)') + ' (validé manuellement)',
+              statut: (isAnomaly ? 'écart de montant' : 'antériorité (dossier identique)') + ' (validé manuellement)' + (chqNote(oSel.map(x=>x.item)) ? ' — ' + chqNote(oSel.map(x=>x.item)) : ''),
               commentaireInitial: commentInput.value
             });
             added++;
@@ -1699,7 +1722,7 @@ function renderReconciled(title, optimumRows, cegidRows, tolerance, seuil, conta
           if(cb.checked) return;
           const item = a.optimumItems[i];
           if(Math.abs(item.montant) <= tolerance) return;
-          addProblemRow({ type:'absent-cegid', client:item.nom, montantOptimum:item.montant, montantCegid:null, ecart:null, date:item.date, age:daysSince(item.date), statut:'absent côté Cegid (validé manuellement)', commentaireInitial: commentInput.value });
+          addProblemRow({ type:'absent-cegid', client:item.nom, montantOptimum:item.montant, montantCegid:null, ecart:null, date:item.date, age:daysSince(item.date), statut:'absent côté Cegid (validé manuellement)' + (chqNote([item]) ? ' — ' + chqNote([item]) : ''), commentaireInitial: commentInput.value });
           added++; bumpTally('absent-cegid', 1);
         });
 
@@ -1971,7 +1994,8 @@ async function exportJustification(){
   const cegCols = [{key:'libelle', header:'Libellé', wch:40}, {key:'montant', header:'Montant', wch:14}, {key:'date', header:'Date', wch:14}];
 
   const rowsFor = (src, categorie, keyMap) => src.filter(r => r.categorie === categorie)
-    .map(r => ({ [keyMap]: keyMap==='client' ? r.client : r.libelle, montant:r.montant, date: r.date ? fmtDate(r.date) : '' }));
+    .map(r => ({ [keyMap]: keyMap==='client' ? r.client : r.libelle, montant:r.montant, date: r.date ? fmtDate(r.date) : '', statut:r.statut||'', commentaire:r.commentaire||'' }));
+  const chqOptCols = optCols.concat([{key:'statut', header:'Statut', wch:18}, {key:'commentaire', header:'Commentaire', wch:40}]);
 
   const tpOptRows  = rowsFor(justifOptimumRows, 'Tiers-payants', 'client');
   const tpCegRows  = rowsFor(justifCegidRows,   'Tiers-payants', 'libelle');
@@ -1998,7 +2022,7 @@ async function exportJustification(){
   let tpOpt=null, tpCeg=null, chqOpt=null, chqCeg=null, avoirsOpt=null, avoirsCeg=null, acomptesOpt=null, acomptesCeg=null, cb=null, vir=null;
   if(tpOptRows.length)  tpOpt  = addListSheet(wb, 'TP Optimum',       `${magasin} - Attentes TP Optimum ${closingDate}`, tpOptRows, optCols, 'montant');
   if(tpCegRows.length)  tpCeg  = addListSheet(wb, 'TP Cegid',         `${magasin} - Attentes TP Cegid ${closingDate} - compte 580301`, tpCegRows, cegCols, 'montant');
-  if(chqOptRows.length) chqOpt = addListSheet(wb, 'Chèques Optimum', `${magasin} - Chèques différés Optimum ${closingDate}`, chqOptRows, optCols, 'montant');
+  if(chqOptRows.length) chqOpt = addListSheet(wb, 'Chèques Optimum', `${magasin} - Chèques différés Optimum ${closingDate}`, chqOptRows, chqOptCols, 'montant');
   if(chqCegRows.length) chqCeg = addListSheet(wb, 'Chèques Cegid',   `${magasin} - Chèques différés Cegid ${closingDate} - compte 580100`, chqCegRows, cegCols, 'montant');
   if(avoirsOptRows.length) avoirsOpt = addListSheet(wb, 'Avoirs Optimum', `${magasin} - Avoirs disponibles Optimum ${closingDate}`, avoirsOptRows, optCols, 'montant');
   if(avoirsCegRows.length) avoirsCeg = addListSheet(wb, 'Avoirs Cegid',   `${magasin} - Avoirs Cegid ${closingDate} - compte 419000`, avoirsCegRows, cegCols, 'montant');
@@ -2011,7 +2035,7 @@ async function exportJustification(){
   // on crée quand même l'onglet de l'autre côté, vide (total 0), pour que les formules et la synthèse restent cohérentes.
   if(wsEcartsTP && !tpOpt)  tpOpt  = addListSheet(wb, 'TP Optimum',       `${magasin} - Attentes TP Optimum ${closingDate}`, [], optCols, 'montant');
   if(wsEcartsTP && !tpCeg)  tpCeg  = addListSheet(wb, 'TP Cegid',         `${magasin} - Attentes TP Cegid ${closingDate} - compte 580301`, [], cegCols, 'montant');
-  if(wsEcartsChq && !chqOpt) chqOpt = addListSheet(wb, 'Chèques Optimum', `${magasin} - Chèques différés Optimum ${closingDate}`, [], optCols, 'montant');
+  if(wsEcartsChq && !chqOpt) chqOpt = addListSheet(wb, 'Chèques Optimum', `${magasin} - Chèques différés Optimum ${closingDate}`, [], chqOptCols, 'montant');
   if(wsEcartsChq && !chqCeg) chqCeg = addListSheet(wb, 'Chèques Cegid',   `${magasin} - Chèques différés Cegid ${closingDate} - compte 580100`, [], cegCols, 'montant');
   if(wsEcartsAvoirs && !avoirsOpt) avoirsOpt = addListSheet(wb, 'Avoirs Optimum', `${magasin} - Avoirs disponibles Optimum ${closingDate}`, [], optCols, 'montant');
   if(wsEcartsAvoirs && !avoirsCeg) avoirsCeg = addListSheet(wb, 'Avoirs Cegid',   `${magasin} - Avoirs Cegid ${closingDate} - compte 419000`, [], cegCols, 'montant');
