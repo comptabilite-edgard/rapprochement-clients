@@ -833,6 +833,18 @@ function detectFileCategory(rows){
   return null;
 }
 
+// Certains exports Cegid stockent la date en formule sans valeur calculée (<f>46204</f>, aucun <v>) :
+// SheetJS lit alors une date invalide. Le numéro de série est dans la formule : on le récupère.
+function repairFormulaDates(ws){
+  Object.keys(ws).forEach(addr => {
+    if(addr[0]==='!') return;
+    const c = ws[addr];
+    if(c && c.f && /^\d+(\.\d+)?$/.test(String(c.f).trim()) && (c.v===null || c.v===undefined || (Object.prototype.toString.call(c.v)==='[object Date]' && isNaN(c.v.getTime())) || (typeof c.v==='number' && isNaN(c.v)))){
+      c.t = 'n'; c.v = Number(c.f); delete c.w;
+    }
+  });
+}
+
 let recognizedFiles = []; // [{id, name, rows, category}]
 let recognizedIdSeq = 0;
 
@@ -846,6 +858,7 @@ function processUnifiedFile(file){
   reader.onload = function(e){
     const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
     const ws = wb.Sheets[wb.SheetNames[0]];
+    repairFormulaDates(ws);
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
     let category = detectFileCategory(rows);
     if(!category && findHeaderRow(rows, ['libellé','débit','crédit']) !== -1 && /ch[eè]q|chq/i.test(file.name)) category = 'chqCegid';
