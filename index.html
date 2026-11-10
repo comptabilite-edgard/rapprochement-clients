@@ -1998,6 +1998,10 @@ async function exportJustification(){
   const closingDate = document.getElementById('closingDate').value.trim();
   if(!magasin){ alert('Choisissez un magasin avant d\'exporter la justification de clôture.'); return; }
   if(!closingDate){ alert('Indiquez la date de clôture (JJ.MM.AAAA) avant d\'exporter.'); return; }
+  // Date de référence de l'ancienneté (provisions, dossiers antérieurs) : la date de clôture saisie, pas la date du jour.
+  const closingDateObj = parseFRDate(closingDate.replace(/\./g,'/').replace(/-/g,'/'));
+  if(!closingDateObj){ alert('Date de clôture non reconnue : utilisez le format JJ.MM.AAAA (ex. 30.09.2026).'); return; }
+  const ageAtClosing = d => d ? Math.floor((closingDateObj - d) / 86400000) : null;
   const seuilAnteriorite = parseInt(document.getElementById('paramSeuil').value) || 60;
 
   const wb = new ExcelJS.Workbook();
@@ -2072,7 +2076,11 @@ async function exportJustification(){
         });
       });
     });
-    return resolved.concat(unresolved);
+    // Ancienneté recalculée à la date de clôture (la valeur d'origine est calculée à la date du jour).
+    return resolved.concat(unresolved).map(r => {
+      const d = (r.date instanceof Date) ? r.date : parseFRDate(r.date);
+      return Object.assign({}, r, { anteriorite: d ? ageAtClosing(d) : null });
+    });
   }
 
   // Un onglet d'écarts à deux côtés (TP, Chèques) : rappel Optimum/Cegid/écart en formules,
@@ -2128,6 +2136,7 @@ async function exportJustification(){
       ws.getCell(rn,5).value = r.date;
       ws.getCell(rn,6).value = r.motif;
       ws.getCell(rn,7).value = r.commentaireMagasin;
+      r._ref = `'${ws.name}'!G${rn}`;
     });
 
     let sommeDetaillee = 0;
@@ -2184,6 +2193,7 @@ async function exportJustification(){
       ws.getCell(rn,4).value = r.date;
       ws.getCell(rn,5).value = r.anteriorite;
       ws.getCell(rn,6).value = r.commentaireMagasin;
+      r._ref = `'${ws.name}'!F${rn}`;
       ws.getCell(rn,2).numFmt = EURO_FMT; ws.getCell(rn,3).numFmt = EURO_FMT;
       // Surligné en rouge : dépasse le seuil de provisionnement, à retrouver dans l'onglet Provisions.
       if((r.anteriorite||0) > seuilProvision){
@@ -2242,6 +2252,7 @@ async function exportJustification(){
       ws.getCell(rn,2).numFmt = EURO_FMT;
       ws.getCell(rn,3).value = r.date;
       ws.getCell(rn,4).value = r.commentaireMagasin;
+      r._ref = `'${ws.name}'!D${rn}`;
       if((r.anteriorite||0) > seuilProvision){
         ws.getRow(rn).eachCell(c => { c.fill = {type:'pattern',pattern:'solid',fgColor:{argb:XL_COLORS.rustSoft}}; });
       }
@@ -2338,20 +2349,40 @@ async function exportJustification(){
   // au même titre que les autres catégories, donc ils ne rentrent pas dans le total provisionné.
   const SEUIL_PROVISION_TP = 730;
   const SEUIL_PROVISION_AUTRES = 365;
+  // Commentaire repris automatiquement de l'onglet Écarts / Détail : formule qui pointe vers la case commentaire
+  // de la ligne (ce que le comptable y écrit ensuite apparaît ici sans ressaisie).
+  const provComment = r => {
+    if(!r.ref) return r.commentaire;
+    const q = t => '"' + String(t).replace(/"/g,'""') + '"';
+    const formula = r.prefix
+      ? q(r.prefix) + '&IF(' + r.ref + '="","",' + q(' — ') + '&' + r.ref + ')'
+      : 'IF(' + r.ref + '="","",' + r.ref + ')';
+    return { formula, result: r.commentaire || '' };
+  };
   const provisionRows = [];
   const infoRows = [];
-  if(ecartsTP) ecartsTP.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_TP).forEach(r =>
-    provisionRows.push({ categorie:'Tiers-payants', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'2 ans (730 j)', commentaire:r.commentaireMagasin }));
-  if(ecartsChq) ecartsChq.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
-    provisionRows.push({ categorie:'Chèques différés', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+  // Dossiers présents sur Cegid et absents sur Optimum (= erreur de lettrage côté Optimum : l'argent n'a pas été reçu).
+  const absentOptimum = r => r.montantOptimum==null && r.montantCegid!=null && (r.motif||'').includes('absent côté Optimum');
+  if(ecartsTP){
+    ecartsTP.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_TP).forEach(r =>
+      provisionRows.push({ categorie:'Tiers-payants', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'2 ans (730 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
+    ecartsTP.ecartsOnly.filter(r => absentOptimum(r) && (r.anteriorite||0) > SEUIL_PROVISION_TP).forEach(r =>
+      provisionRows.push({ categorie:'Tiers-payants', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'2 ans (730 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
+  }
+  if(ecartsChq){
+    ecartsChq.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+      provisionRows.push({ categorie:'Chèques différés', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
+    ecartsChq.ecartsOnly.filter(r => absentOptimum(r) && (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
+      provisionRows.push({ categorie:'Chèques différés', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
+  }
   if(ecartsAvoirs) ecartsAvoirs.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
-    infoRows.push({ categorie:'Avoirs', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+    infoRows.push({ categorie:'Avoirs', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
   if(ecartsAcomptes) ecartsAcomptes.anteriorityOnly.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
-    infoRows.push({ categorie:'Acomptes', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+    infoRows.push({ categorie:'Acomptes', client:r.client, montant: (r.montantOptimum!=null?r.montantOptimum:r.montantCegid), date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
   if(ecartsCB) ecartsCB.lines.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
-    provisionRows.push({ categorie:'CB non encaissées', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+    provisionRows.push({ categorie:'CB non encaissées', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
   if(ecartsVir) ecartsVir.lines.filter(r => (r.anteriorite||0) > SEUIL_PROVISION_AUTRES).forEach(r =>
-    provisionRows.push({ categorie:'Virements en attente', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin }));
+    provisionRows.push({ categorie:'Virements en attente', client:r.client, montant:r.montantCegid, date:r.date, anteriorite:r.anteriorite, seuil:'1 an (365 j)', commentaire:r.commentaireMagasin, ref:r._ref }));
 
   wsProv.columns = [{width:20},{width:26},{width:14},{width:12},{width:16},{width:16},{width:34}];
   addTitleRow(wsProv, `${magasin} - Dossiers à provisionner ${closingDate}`, 7);
@@ -2370,7 +2401,7 @@ async function exportJustification(){
     wsProv.getCell(rn,4).value = r.date;
     wsProv.getCell(rn,5).value = r.anteriorite;
     wsProv.getCell(rn,6).value = r.seuil;
-    wsProv.getCell(rn,7).value = r.commentaire;
+    wsProv.getCell(rn,7).value = provComment(r);
   });
   const provTotalRow = provHeaderRow + provisionRows.length + 1;
   const provTotalRowObj = wsProv.getRow(provTotalRow);
@@ -2406,7 +2437,7 @@ async function exportJustification(){
       wsProv.getCell(rn,4).value = r.date;
       wsProv.getCell(rn,5).value = r.anteriorite;
       wsProv.getCell(rn,6).value = r.seuil;
-      wsProv.getCell(rn,7).value = r.commentaire;
+      wsProv.getCell(rn,7).value = provComment(r);
     });
     const infoTotalRow = infoFirstDataRow + infoRows.length;
     const infoTotalRowObj = wsProv.getRow(infoTotalRow);
